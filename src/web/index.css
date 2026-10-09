@@ -1,0 +1,73 @@
+@import 'tailwindcss';
+
+/* Dark only. One accent (green), amber for secondary highlights, red only for zero HP / save failures. */
+:root {
+  color-scheme: dark;
+  --background: #0d0d0e;
+  --foreground: #ececec;
+  --card: #151516;
+  --card-foreground: #ececec;
+  --popover: #151516;
+  --popover-foreground: #ececec;
+  --primary: #3fcf8e;
+  --primary-foreground: #0d0d0e;
+  --secondary: #1c1c1e;
+  --secondary-foreground: #ececec;
+  --muted: #1c1c1e;
+  --muted-foreground: #8d8d92;
+  --accent: #1c1c1e;
+  --accent-foreground: #ececec;
+  --destructive: #ef5f5f;
+  --border: #2a2a2d;
+  --input: #2a2a2d;
+  --ring: #3fcf8e;
+  --warn: #e6b84c;
+}
+
+@theme inline {
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-warn: var(--warn);
+}
+
+@layer base {
+  * { border-color: var(--border); }
+  html { font-size: 14px; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    margin: 0;
+  }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  h1, h2, h3 { font-weight: 500; }
+  table { border-collapse: collapse; width: 100%; }
+  summary { cursor: pointer; }
+}
+
+/* small uppercase dim section/column label */
+.label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}

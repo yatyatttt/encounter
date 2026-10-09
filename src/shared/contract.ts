@@ -166,6 +166,7 @@ export const AddEntry = z
   .object({
     templateId: id.optional(),
     adhoc: CombatantFields.optional(),
+    name: z.string().trim().min(1).max(200).optional(), // instance name; defaults to the template/ad hoc name
     quantity: int(1, MAX_COMBATANTS).default(1), // quantity > 1 => names "<Name> 1", "<Name> 2", ...
     initiative: initiativeInput.optional(), // required by the server when joining a running encounter
   })
@@ -233,7 +234,7 @@ export const DuplicateOptions = z.object({
 export type DuplicateOptions = z.infer<typeof DuplicateOptions>;
 
 // ---------- settings / data ----------
-export type BackupInfo = { id: string; createdAt: number; reason: 'manual' | 'auto' | 'pre-restore'; sizeBytes: number };
+export type BackupInfo = { id: string; createdAt: number; reason: 'manual' | 'auto' | 'pre-restore' | 'pre-migration'; sizeBytes: number };
 export type Settings = {
   appVersion: string;
   rulesVersion: string;
