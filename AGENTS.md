@@ -1,6 +1,6 @@
 # Encounter — agent guide
 
-Local-first D&D 2024 combat manager for a single DM on one machine. **Simplicity is the top goal:** implement P0 scope with the smallest coherent change; avoid speculative abstractions, tables, or dependencies.
+Local-first D&D 2024 combat manager for a single DM on one machine. Current scope is P0 plus Concentration and condition durations/reminders (PRD §§15.1–15.2, with durations integrated into Conditions per the user's refinement). **Simplicity is the top goal:** use the smallest coherent change; avoid speculative abstractions, tables, or dependencies.
 
 This is the canonical repository guide for Codex and other coding agents. Keep shared guidance here; `CLAUDE.md` points here. The original PRD/TRD is referenced in comments but is not checked in. Use the code, tests, and `README.md` for available context; request the relevant spec only when a task depends on missing requirements.
 
@@ -31,7 +31,7 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 ## Runtime and local data
 
 - The server binds to `127.0.0.1`, default port 8787. API endpoints are under `/api/v1`; the health check is `GET /api/v1/health`.
-- `PORT` changes the API port. Vite's `/api` proxy is hard-coded to 8787 in `vite.config.ts`; setting `PORT` alone does not update the development proxy. Keep Vite on 5173, which the server's Host/Origin allowlist includes.
+- `PORT` changes the API port. Vite's `/api/` proxy is hard-coded to 8787 in `vite.config.ts`; setting `PORT` alone does not update the development proxy. Keep the trailing slash so `/api.ts` is served as a frontend module. Keep Vite on 5173, which the server's Host/Origin allowlist includes.
 - `ENCOUNTER_DATA_DIR` selects the directory containing `encounter.sqlite` and `backups/`. Without it, `src/server/db.ts` selects the OS app-data directory.
 - For agent-run smoke tests, use a fresh temporary directory, e.g. `ENCOUNTER_DATA_DIR="$(mktemp -d /tmp/encounter-agent-XXXXXX)" npm run dev`. Do not test mutations or restore against the user's default database.
 
@@ -40,6 +40,8 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 - `src/shared/contract.ts`: Zod schemas, inferred types, DTOs, constants, and endpoint list. For API changes, update the contract first, then domain/server/web consumers.
 - `src/domain/encounter.ts`: pure state transitions (`applyCommand`), ordering, eligibility, snapshots, and duplication. Inject time, IDs, and template lookup through `Ctx`; keep IO out of the domain.
 - `src/domain/hp.ts`: pure HP math and quick-input parsing, shared with UI previews. Reuse it instead of duplicating calculations.
+- `src/domain/concentration.ts`: concentration DC and effective Incapacitated helpers. Concentration commands remain in `applyCommand`; see `docs/concentration.md` for scope and persistence.
+- `src/domain/timing.ts`: effect expiry and reminder occurrence processing at explicit boundaries. See `docs/effects-and-reminders.md` for duration semantics, source/anchor review, and Previous Turn behavior.
 - `src/server/app.ts`: Hono routes and error/security handling. `createApp(db, opts)` does not listen; `index.ts` owns startup and shutdown.
 - `src/server/repo.ts`: loads/saves whole encounter state. `schema.ts` defines Drizzle tables and SQL constraints; `db.ts` opens SQLite and applies migrations.
 - `src/server/backup.ts` and `data.ts`: backups and strict JSON export/restore validation. Persistent field changes may also need export/restore schema updates.
@@ -56,7 +58,11 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 - At most one encounter is active. Completed encounters accept metadata and archive commands only.
 - Each round has a frozen schedule: initiative/tie edits affect the next round. New/reinstated combatants join next round by default; explicit current-round joins use frozen keys and cannot grant a second or retroactive turn.
 - Previous Turn restores scheduling only, immediately after Next Turn; any intervening successful mutation clears the checkpoint. It creates a new version rather than undoing arbitrary combat state.
-- Damage consumes temp HP first; healing caps at max HP. Draft HP edits update starting values. Conditions retain individual source applications; exhaustion is a separate 0–6 level. Condition effects remain the DM's responsibility.
+- Boundaries run in order: turn end, round end/start when needed, then turn start. Boundary IDs never rewind. An advance that expires effects or creates reminder occurrences disables Previous Turn; ordinary schedule-only advances can still be reversed. Reloads and stale retries never repeat occurrences.
+- Effect sources and duration anchors are independent. End-of-next-turn waits for a future anchor turn start before its end; fixed rounds persist an explicit expiry round. Removed/excluded creature anchors and sources are flagged for review; creature timers wait, while whole-round timers can continue independently. Reminders only prompt; they never apply damage or invent outcomes.
+- Duration is part of each condition source in the UI. `ADD_CONDITION` with `duration` creates the application and internal timing record atomically; `UPDATE_CONDITION` edits that source only. Removing an application clears its unused timer and obsolete save prompts. Existing shared/legacy links remain readable; editing one shared application splits its duration without changing others. Removed targets can still have durations edited or conditions removed. Do not reintroduce a standalone effect creation workflow.
+- Damage consumes temp HP first; healing caps at max HP. Draft HP edits update starting values. Conditions retain individual source applications; exhaustion is a separate 0–6 level. Effective Incapacitated ends concentration; other condition effects remain the DM's responsibility.
+- Concentration damage checks use resolved positive damage before HP/temp HP absorption: DC `min(30, max(10, floor(damage / 2)))`. Keep separate pending checks. HP corrections/healing/zero damage never create checks; 0 HP alone does not confirm death. End only explicitly linked condition applications; preserve unrelated sources and temp HP. Caster removal requires an explicit keep/end choice.
 - Restore validates shape, bounds, and relationships, creates a verified safety backup, then replaces data in one transaction. Preserve rollback and pre-migration backup behavior.
 
 ## Tests to extend
@@ -64,6 +70,9 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 - `src/domain/encounter.test.ts`: HP, initiative, scheduling, roster changes, Previous Turn, conditions, lifecycle, and duplication. Use deterministic injected context and check that previous state stays unchanged.
 - `src/server/api.test.ts`: real SQLite in temporary directories, Hono `app.request()` without a network listener, persistence/restart, version conflicts, security, backups, restore rollback, and static serving. Follow its fixture cleanup and explicit Host header pattern.
 - `src/web/helpers.test.ts`: pure UI helpers. UI previews must agree with domain behavior; use focused regression tests for changed logic.
+- `src/web/concentration.test.ts`: concentration/save announcements from acknowledged snapshots.
+- `src/domain/timing.test.ts` and `src/web/timing.test.ts`: boundary order, durations, reminder identities/statuses, save-ends target cleanup, review behavior, previews, and announcements.
+- `src/web/dev-server.test.ts`: Vite module serving and API proxying using isolated loopback servers and a temporary cache; requires permission to bind local ports.
 
 ## UI style
 

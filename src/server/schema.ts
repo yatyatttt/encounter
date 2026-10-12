@@ -1,6 +1,7 @@
 // Drizzle schema (PRD 8.2, trimmed to what the app uses). Bounds are enforced in SQL as well as in Zod.
 import { sql, type SQL } from 'drizzle-orm';
 import { check, foreignKey, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { emptyTiming } from '../domain/timing';
 
 const KINDS = ['player', 'enemy', 'npc'] as const;
 const CONDITIONS = [
@@ -61,6 +62,8 @@ export const encounters = sqliteTable(
     round: integer('round').notNull(),
     activeCombatantId: text('active_combatant_id'),
     scheduleJson: text('schedule_json').notNull(), // { pendingIds, actedIds, orderKeys }; round/activeId are the scalar columns
+    concentrationsJson: text('concentrations_json').notNull().default('[]'), // active records, linked effects, and pending checks
+    timingJson: text('timing_json').notNull().default(JSON.stringify(emptyTiming())),
     lastTurnCheckpointJson: text('last_turn_checkpoint_json'),
     rulesVersion: text('rules_version').notNull(),
     skipZeroHpEnemies: integer('skip_zero_hp_enemies', { mode: 'boolean' }).notNull().default(true),
@@ -144,6 +147,7 @@ export const conditions = sqliteTable(
     sourceCombatantId: text('source_combatant_id'),
     sourceLabel: text('source_label').notNull(),
     notes: text('notes').notNull(),
+    effectId: text('effect_id'), // validated against encounter effects in domain commands and restore
   },
   (t) => [
     check('conditions_key', inList(t.conditionKey, CONDITIONS)),

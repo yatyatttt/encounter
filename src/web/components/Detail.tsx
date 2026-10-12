@@ -4,7 +4,10 @@ import { X } from 'lucide-react';
 import { useStore, useDraft } from '@/store';
 import { previewHpInput, conditionBadges, cap, hpBar } from '@/helpers';
 import { grantTempHp } from '../../domain/hp';
-import { CONDITION_KEYS, type CombatantDto, type ConditionKey, type EncounterCommand, type EditableCombatantPatch, type TurnPolicy } from '../../shared/contract';
+import { concentrationDc } from '../../domain/concentration';
+import { type CombatantDto, type ConditionDto, type ConditionKey, type EncounterCommand, type EditableCombatantPatch, type TurnPolicy } from '../../shared/contract';
+import { effectReview } from '../../domain/timing';
+import { conditionDurationDescription } from '@/timing';
 import { CONDITION_RULES, RULES_VERSION } from '@/rules';
 import { Button } from '@/components/ui/button';
 import { Input, Select, Textarea, Field } from '@/components/ui/input';
@@ -12,6 +15,9 @@ import { Badge } from '@/components/ui/badge';
 import { Segmented } from '@/components/ui/segmented';
 import { Confirm } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { ConcentrationPanel, ConcentrationRemoval } from '@/components/Concentration';
+import { ParticipationConditionsNotice } from '@/components/Reminders';
+import { ConditionEditor } from '@/components/ConditionEditor';
 
 const isInt = (s: string) => s.trim() !== '' && Number.isInteger(Number(s));
 
@@ -31,6 +37,7 @@ function DetailBody({ c, draft }: { c: CombatantDto; draft: boolean }) {
   const select = useStore((s) => s.select);
   const busy = useStore((s) => s.save === 'saving');
   const [removing, setRemoving] = useState(false);
+  const [concentrationPolicy, setConcentrationPolicy] = useState<'keep' | 'end'>('keep');
   const locked = snap.status === 'completed' || c.removedAt !== null;
   const isActive = snap.activeCombatantId === c.id;
   const conditions = snap.conditions.filter((x) => x.targetCombatantId === c.id);
@@ -67,7 +74,7 @@ function DetailBody({ c, draft }: { c: CombatantDto; draft: boolean }) {
       )}
 
       {locked ? (
-        <p className="text-sm text-muted-foreground">{snap.status === 'completed' ? 'Completed encounters are read-only.' : 'Removed combatants are read-only. Reinstate it from the Removed / excluded section.'}</p>
+        <p className="text-sm text-muted-foreground">{snap.status === 'completed' ? 'Completed encounters are read-only.' : 'Stats are read-only while removed. Condition durations can still be edited or removed; reinstate to add new conditions or edit stats.'}</p>
       ) : (
         <details open={draft} className="border-t border-border pt-3">
           <summary className="label">{draft ? 'Starting stats' : 'Corrections'}</summary>
@@ -84,11 +91,12 @@ function DetailBody({ c, draft }: { c: CombatantDto; draft: boolean }) {
         </details>
       )}
 
-      <Conditions c={c} locked={locked} conditions={conditions} />
+      <ConcentrationPanel c={c} locked={locked} />
+      <Conditions c={c} locked={snap.status === 'completed'} conditions={conditions} />
 
       {!locked && !draft && (
         <div className="border-t border-border pt-3">
-          <Button variant="outline" onClick={() => setRemoving(true)} disabled={busy}>Remove {c.name}</Button>
+          <Button variant="outline" onClick={() => { setConcentrationPolicy('keep'); setRemoving(true); }} disabled={busy}>Remove {c.name}</Button>
         </div>
       )}
       <Confirm
@@ -96,13 +104,15 @@ function DetailBody({ c, draft }: { c: CombatantDto; draft: boolean }) {
         onOpenChange={setRemoving}
         title={`Remove ${c.name}?`}
         confirmLabel="Remove"
-        onConfirm={() => send({ type: 'REMOVE_COMBATANT', combatantId: c.id })}
+        onConfirm={() => send({ type: 'REMOVE_COMBATANT', combatantId: c.id, concentrationPolicy })}
       >
         {isActive && snap.status === 'active'
           ? <p><strong>{c.name} is the ACTIVE combatant.</strong> Removing it ends its turn and advances to the next participant in the same step.</p>
           : isActive
             ? <p>{c.name} is the active combatant. Combat is paused, so removing it clears the active turn; the next participant is chosen when you resume.</p>
             : <p>{c.name} leaves the turn order but is kept as a removed entry, so you can reinstate it later.</p>}
+        <ConcentrationRemoval combatantId={c.id} value={concentrationPolicy} onChange={setConcentrationPolicy} />
+        <ParticipationConditionsNotice combatantId={c.id} />
       </Confirm>
 
       <RulesReference />
@@ -116,6 +126,8 @@ function HpEntry({ c }: { c: CombatantDto }) {
   const busy = useStore((s) => s.save === 'saving');
   const ref = useRef<HTMLInputElement>(null);
   const preview = previewHpInput(c, text);
+  const concentrating = useStore((s) => s.snapshot!.concentrations.some((k) => k.combatantId === c.id));
+  const checkDc = concentrating && preview?.ok && preview.command.type === 'APPLY_DAMAGE' && preview.command.amount > 0 ? concentrationDc(preview.command.amount) : null;
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!preview?.ok) return; // never commit partial / invalid typing
@@ -136,6 +148,7 @@ function HpEntry({ c }: { c: CombatantDto }) {
         )}
       </Field>
       <p className={cn('min-h-5 text-xs', preview && !preview.ok ? 'text-warn' : 'text-foreground')} aria-live="polite">{preview?.label ?? ''}</p>
+      {checkDc !== null && <p className="text-xs text-warn" role="status">Concentration: prompts a DC {checkDc} Constitution save.</p>}
     </form>
   );
 }
@@ -226,17 +239,12 @@ function EditFields({ c }: { c: CombatantDto }) {
   );
 }
 
-function Conditions({ c, locked, conditions }: { c: CombatantDto; locked: boolean; conditions: { id: string; conditionKey: ConditionKey; sourceLabel: string; notes: string }[] }) {
+function Conditions({ c, locked, conditions }: { c: CombatantDto; locked: boolean; conditions: ConditionDto[] }) {
   const send = useStore((s) => s.send);
   const busy = useStore((s) => s.save === 'saving');
-  const [key, setKey] = useState<ConditionKey>('poisoned');
-  const [source, setSource] = useState('');
-  const [notes, setNotes] = useState('');
+  const [editing, setEditing] = useState<ConditionDto | null>();
+  const snap = useStore((s) => s.snapshot)!;
   const badges = conditionBadges(conditions, c.exhaustionLevel);
-  const add = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (await send({ type: 'ADD_CONDITION', combatantId: c.id, conditionKey: key, sourceLabel: source, notes })) { setSource(''); setNotes(''); }
-  };
   return (
     <section aria-label="Conditions" className="flex flex-col gap-3 border-t border-border pt-3">
       <h3 className="label">Conditions</h3>
@@ -249,18 +257,22 @@ function Conditions({ c, locked, conditions }: { c: CombatantDto; locked: boolea
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="amber">{b.label}{b.count > 1 && ` ×${b.count} sources`}</Badge>
                 {b.count > 1 && !locked && (
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void send({ type: 'REMOVE_ALL_CONDITION_SOURCES', combatantId: c.id, conditionKey: b.key as ConditionKey })}>
-                    Remove all {b.count} sources of {b.label} from {c.name}
+                  <Button variant="ghost" aria-label={`Remove all ${b.count} sources of ${b.label} from ${c.name}`} disabled={busy} onClick={() => void send({ type: 'REMOVE_ALL_CONDITION_SOURCES', combatantId: c.id, conditionKey: b.key as ConditionKey })}>
+                    Remove all sources
                   </Button>
                 )}
               </div>
               <ul className="ml-2 flex flex-col gap-1 border-l border-border pl-3">
-                {apps.map((a) => (
-                  <li key={a.id} className="flex items-center justify-between gap-2 text-sm">
-                    <span><span className="text-warn">└</span> {a.sourceLabel || <span className="text-muted-foreground">no source</span>}{a.notes && <span className="text-muted-foreground"> — {a.notes}</span>}</span>
-                    {!locked && <Button size="sm" variant="ghost" disabled={busy} aria-label={`Remove ${b.label} from ${a.sourceLabel || 'unnamed source'}`} onClick={() => void send({ type: 'REMOVE_CONDITION', applicationId: a.id })}>Remove</Button>}
-                  </li>
-                ))}
+                {apps.map((a) => {
+                  const timer = snap.timing.effects.find((e) => e.id === a.effectId);
+                  const review = timer ? effectReview(snap, timer) : [];
+                  return <li key={a.id} className="flex flex-col gap-1 text-sm">
+                    <p className="break-words"><span className="text-warn">└</span> {a.sourceLabel || <span className="text-muted-foreground">no source</span>}{a.notes && <span className="text-muted-foreground"> — {a.notes}</span>}</p>
+                    <p className="text-xs text-warn">{conditionDurationDescription(snap, a)}</p>
+                    {review.map((problem) => <p key={problem} className="text-xs text-warn">Review required: {problem}. Edit this condition's duration or remove it.</p>)}
+                    {!locked && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} aria-label={`Edit ${b.label} from ${a.sourceLabel || 'unnamed source'}`} onClick={() => setEditing(a)}>Edit duration / source</Button><Button variant="ghost" disabled={busy} aria-label={`Remove ${b.label} from ${a.sourceLabel || 'unnamed source'}`} onClick={() => void send({ type: 'REMOVE_CONDITION', applicationId: a.id })}>Remove</Button></div>}
+                  </li>;
+                })}
               </ul>
               <p className="text-xs text-muted-foreground">{CONDITION_RULES[b.key]}</p>
             </li>
@@ -271,7 +283,7 @@ function Conditions({ c, locked, conditions }: { c: CombatantDto; locked: boolea
       <div className="flex flex-col gap-1">
         <Field label="Exhaustion level (0–6)">
           {(id) => (
-            <Select id={id} value={c.exhaustionLevel} disabled={locked || busy} onChange={(e) => void send({ type: 'SET_EXHAUSTION', combatantId: c.id, level: Number(e.target.value) })}>
+            <Select id={id} value={c.exhaustionLevel} disabled={locked || busy || c.removedAt !== null} onChange={(e) => void send({ type: 'SET_EXHAUSTION', combatantId: c.id, level: Number(e.target.value) })}>
               {[0, 1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n === 0 ? '0 — none' : `Level ${n}`}</option>)}
             </Select>
           )}
@@ -280,16 +292,8 @@ function Conditions({ c, locked, conditions }: { c: CombatantDto; locked: boolea
         {c.exhaustionLevel === 6 && <p role="alert" className="border border-warn p-2 text-xs text-warn">WARNING: level 6 exhaustion is death under the 2024 rules. The app does not mark anyone dead — confirm the outcome, then exclude or remove {c.name} if needed.</p>}
       </div>
 
-      {!locked && (
-        <form onSubmit={add} className="grid grid-cols-2 gap-2">
-          <Field label="Add condition" className="col-span-2">
-            {(id) => <Select id={id} value={key} onChange={(e) => setKey(e.target.value as ConditionKey)}>{CONDITION_KEYS.map((k) => <option key={k} value={k}>{cap(k)}</option>)}</Select>}
-          </Field>
-          <Field label="Source">{(id) => <Input id={id} value={source} onChange={(e) => setSource(e.target.value)} placeholder="e.g. Ghoul claw" />}</Field>
-          <Field label="Notes">{(id) => <Input id={id} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>
-          <div className="col-span-2 flex justify-end"><Button type="submit" disabled={busy}>Add {cap(key)}</Button></div>
-        </form>
-      )}
+      {!locked && c.removedAt === null && <Button variant="outline" disabled={busy || snap.timing.effects.length >= 500} onClick={() => setEditing(null)}>Add condition</Button>}
+      {editing !== undefined && <ConditionEditor combatantId={c.id} application={editing} close={() => setEditing(undefined)} />}
     </section>
   );
 }

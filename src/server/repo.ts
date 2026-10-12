@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { and, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { CheckpointSchema, ScheduleSchema, type EncounterState } from '../domain/encounter';
-import type { CombatantFields, EncounterStatus, EncounterSummary, Template } from '../shared/contract';
+import { ConcentrationsSchema, TimingSchema, type CombatantFields, type EncounterStatus, type EncounterSummary, type Template } from '../shared/contract';
 import { combatants, conditions, encounters, templates } from './schema';
 
 export type Db = BetterSQLite3Database & { $client: Database.Database };
@@ -15,11 +15,13 @@ const rowid = sql`rowid`;
 export function loadEncounter(q: Q, id: string): EncounterState | undefined {
   const row = q.select().from(encounters).where(eq(encounters.id, id)).get();
   if (!row) return undefined;
-  const { scheduleJson, lastTurnCheckpointJson, activeCombatantId, ...rest } = row;
+  const { scheduleJson, concentrationsJson, timingJson, lastTurnCheckpointJson, activeCombatantId, ...rest } = row;
   return {
     ...rest,
     activeId: activeCombatantId,
     schedule: ScheduleSchema.parse(JSON.parse(scheduleJson)),
+    concentrations: ConcentrationsSchema.parse(JSON.parse(concentrationsJson)),
+    timing: TimingSchema.parse(JSON.parse(timingJson)),
     checkpoint: lastTurnCheckpointJson ? CheckpointSchema.parse(JSON.parse(lastTurnCheckpointJson)) : null,
     combatants: q.select().from(combatants).where(eq(combatants.encounterId, id)).orderBy(rowid).all().map(({ encounterId: _, ...c }) => c),
     conditions: q.select().from(conditions).where(eq(conditions.encounterId, id)).orderBy(rowid).all().map(({ encounterId: _, ...k }) => k),
@@ -27,11 +29,13 @@ export function loadEncounter(q: Q, id: string): EncounterState | undefined {
 }
 
 export function saveEncounter(q: Q, s: EncounterState) {
-  const { combatants: cs, conditions: ks, activeId, schedule, checkpoint, ...rest } = s;
+  const { combatants: cs, conditions: ks, concentrations, timing, activeId, schedule, checkpoint, ...rest } = s;
   const row = {
     ...rest,
     activeCombatantId: activeId,
     scheduleJson: JSON.stringify(schedule),
+    concentrationsJson: JSON.stringify(concentrations),
+    timingJson: JSON.stringify(timing),
     lastTurnCheckpointJson: checkpoint ? JSON.stringify(checkpoint) : null,
   };
   q.insert(encounters).values(row).onConflictDoUpdate({ target: encounters.id, set: row }).run();

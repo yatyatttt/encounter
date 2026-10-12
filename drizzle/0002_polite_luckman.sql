@@ -1,0 +1,1 @@
+ALTER TABLE `encounters` ADD `timing_json` text DEFAULT '{"boundaryId":0,"lastRoundEnd":0,"effects":[],"reminders":[],"occurrences":[]}' NOT NULL;

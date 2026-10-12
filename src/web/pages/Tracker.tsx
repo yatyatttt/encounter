@@ -12,6 +12,8 @@ import { Detail } from '@/components/Detail';
 import { AddCombatant } from '@/components/AddCombatant';
 import { DuplicateButton } from '@/components/Duplicate';
 import { cn } from '@/lib/utils';
+import { ConcentrationChecks } from '@/components/Concentration';
+import { RemindersManager } from '@/components/Reminders';
 
 export function Tracker() {
   const snap = useStore((s) => s.snapshot)!;
@@ -82,6 +84,9 @@ export function Tracker() {
         </section>
       )}
       {paused && <p className="text-sm text-warn">Combat is paused: turns do not advance. HP and condition corrections still work. Press Resume to continue.</p>}
+      {running && snap.nextTurnConsequences.length > 0 && <p className="border-l-2 border-warn pl-3 text-sm text-warn" role="status">Next Turn: {snap.nextTurnConsequences.join('; ')}. Previous Turn is unavailable after condition or reminder changes.</p>}
+      <ConcentrationChecks />
+      <RemindersManager />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-w-0 flex-col gap-4">
@@ -100,6 +105,7 @@ export function Tracker() {
                   const acted = snap.schedule.actedIds.includes(c.id);
                   const frozen = snap.schedule.orderKeys[c.id]?.initiative;
                   const badges = conditionBadges(snap.conditions.filter((x) => x.targetCombatantId === c.id), c.exhaustionLevel);
+                  const concentration = snap.concentrations.find((k) => k.combatantId === c.id);
                   return (
                     <tr
                       key={c.id}
@@ -120,6 +126,7 @@ export function Tracker() {
                           {isSel && <span className="text-primary">{isActive ? '· ' : ''}Selected</span>}
                           {acted && !isActive && <span className="text-muted-foreground">Acted</span>}
                         </span>
+                        {concentration && <Badge tone="amber">Concentrating: {concentration.name}{concentration.checks.length > 0 && ` · ${concentration.checks.length} check${concentration.checks.length === 1 ? '' : 's'}`}</Badge>}
                       </td>
                       <td className="p-3 align-middle">
                         {c.currentHp === 0 ? <span className="text-destructive">0 HP</span> : <span className="text-base">{c.currentHp}</span>} <span className="text-muted-foreground">/ {c.maxHp}</span>
@@ -153,6 +160,7 @@ export function Tracker() {
                   <li key={c.id} className="flex flex-wrap items-center gap-3 border-t border-border py-2">
                     <button type="button" onClick={() => select(c.id)} className="min-h-11 cursor-pointer text-left hover:text-primary">{c.name}{c.id === selectedId && <span className="label ml-2 text-primary">Selected</span>}</button>
                     <Badge tone="amber">Not scheduled</Badge>
+                    {snap.concentrations.some((k) => k.combatantId === c.id) && <Badge tone="amber">Concentrating</Badge>}
                     <span className="text-xs text-muted-foreground">{c.currentHp === 0 ? '0 HP' : `${c.currentHp} HP`} · {c.turnPolicy === 'exclude' ? 'excluded by policy' : c.initiativeTotal === null ? 'no initiative' : 'skipped by HP policy'}</span>
                     {!completed && (
                       <label className="ml-auto flex items-center gap-2 text-xs"><span className="label">Policy</span>
@@ -167,6 +175,7 @@ export function Tracker() {
                   <li key={c.id} className="flex flex-wrap items-center gap-3 border-t border-border py-2">
                     <button type="button" onClick={() => select(c.id)} className="min-h-11 cursor-pointer text-left text-muted-foreground hover:text-foreground">{c.name}</button>
                     <Badge>Removed</Badge>
+                    {snap.concentrations.some((k) => k.combatantId === c.id) && <Badge tone="amber">Concentration kept</Badge>}
                     {!completed && <Button size="sm" variant="outline" className="ml-auto" disabled={busy} onClick={() => { setJoin('next-round'); setReinstating(c); }}>Reinstate…</Button>}
                   </li>
                 ))}
@@ -180,6 +189,8 @@ export function Tracker() {
       <AddCombatant open={adding} onOpenChange={setAdding} />
       <Confirm open={ending} onOpenChange={setEnding} title={`End combat: ${snap.name}?`} confirmLabel="End combat" onConfirm={() => send({ type: 'COMPLETE_COMBAT' })}>
         End combat for <strong>{snap.name}</strong> at round {snap.round}? It becomes a read-only completed record; you can duplicate it into a new draft.
+        {snap.timing.effects.some((e) => e.duration.kind === 'encounter-end') && <p className="mt-2 text-warn">Ends: {snap.timing.effects.filter((e) => e.duration.kind === 'encounter-end').map((e) => e.name).join(', ')}.</p>}
+        {snap.timing.occurrences.some((o) => o.status !== 'resolved') && <p className="mt-2 text-warn">Unresolved reminders remain in the completed record and become read-only. Resolve them first if you still need to act on them.</p>}
       </Confirm>
       <Confirm
         open={!!reinstating}

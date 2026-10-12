@@ -1,0 +1,846 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "8a485f21-06cf-4bad-8ae1-fe72c119ae07",
+  "prevId": "51eccf81-bda0-447b-ad57-e367e76d314c",
+  "tables": {
+    "app_settings": {
+      "name": "app_settings",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "encounter_combatants": {
+      "name": "encounter_combatants",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "encounter_id": {
+          "name": "encounter_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "template_id": {
+          "name": "template_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "max_hp": {
+          "name": "max_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "current_hp": {
+          "name": "current_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "temp_hp": {
+          "name": "temp_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "starting_hp": {
+          "name": "starting_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "starting_temp_hp": {
+          "name": "starting_temp_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "armor_class": {
+          "name": "armor_class",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "initiative_modifier": {
+          "name": "initiative_modifier",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "speed_ft": {
+          "name": "speed_ft",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "class_name": {
+          "name": "class_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "level": {
+          "name": "level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "passive_perception": {
+          "name": "passive_perception",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "initiative_total": {
+          "name": "initiative_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "initiative_roll": {
+          "name": "initiative_roll",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "initiative_mode": {
+          "name": "initiative_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tie_rank": {
+          "name": "tie_rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turn_policy": {
+          "name": "turn_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "exhaustion_level": {
+          "name": "exhaustion_level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "combatants_encounter_id": {
+          "name": "combatants_encounter_id",
+          "columns": [
+            "encounter_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "combatants_encounter_initiative": {
+          "name": "combatants_encounter_initiative",
+          "columns": [
+            "encounter_id",
+            "initiative_total",
+            "tie_rank"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "encounter_combatants_encounter_id_encounters_id_fk": {
+          "name": "encounter_combatants_encounter_id_encounters_id_fk",
+          "tableFrom": "encounter_combatants",
+          "tableTo": "encounters",
+          "columnsFrom": [
+            "encounter_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_combatants_template_id_combatant_templates_id_fk": {
+          "name": "encounter_combatants_template_id_combatant_templates_id_fk",
+          "tableFrom": "encounter_combatants",
+          "tableTo": "combatant_templates",
+          "columnsFrom": [
+            "template_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "combatants_kind": {
+          "name": "combatants_kind",
+          "value": "\"encounter_combatants\".\"kind\" in ('player', 'enemy', 'npc')"
+        },
+        "combatants_name": {
+          "name": "combatants_name",
+          "value": "length(\"encounter_combatants\".\"name\") > 0"
+        },
+        "combatants_max_hp": {
+          "name": "combatants_max_hp",
+          "value": "\"encounter_combatants\".\"max_hp\" between 1 and 1000000"
+        },
+        "combatants_current_hp": {
+          "name": "combatants_current_hp",
+          "value": "\"encounter_combatants\".\"current_hp\" between 0 and \"encounter_combatants\".\"max_hp\""
+        },
+        "combatants_temp_hp": {
+          "name": "combatants_temp_hp",
+          "value": "\"encounter_combatants\".\"temp_hp\" between 0 and 1000000"
+        },
+        "combatants_starting_hp": {
+          "name": "combatants_starting_hp",
+          "value": "\"encounter_combatants\".\"starting_hp\" between 0 and \"encounter_combatants\".\"max_hp\""
+        },
+        "combatants_starting_temp_hp": {
+          "name": "combatants_starting_temp_hp",
+          "value": "\"encounter_combatants\".\"starting_temp_hp\" between 0 and 1000000"
+        },
+        "combatants_ac": {
+          "name": "combatants_ac",
+          "value": "\"encounter_combatants\".\"armor_class\" between 0 and 1000"
+        },
+        "combatants_init_mod": {
+          "name": "combatants_init_mod",
+          "value": "\"encounter_combatants\".\"initiative_modifier\" between -1000 and 1000"
+        },
+        "combatants_speed": {
+          "name": "combatants_speed",
+          "value": "\"encounter_combatants\".\"speed_ft\" between 0 and 1000000"
+        },
+        "combatants_level": {
+          "name": "combatants_level",
+          "value": "(\"encounter_combatants\".\"level\" is null or \"encounter_combatants\".\"level\" between 1 and 20)"
+        },
+        "combatants_pp": {
+          "name": "combatants_pp",
+          "value": "(\"encounter_combatants\".\"passive_perception\" is null or \"encounter_combatants\".\"passive_perception\" between 0 and 1000)"
+        },
+        "combatants_init_total": {
+          "name": "combatants_init_total",
+          "value": "(\"encounter_combatants\".\"initiative_total\" is null or \"encounter_combatants\".\"initiative_total\" between -10000 and 10000)"
+        },
+        "combatants_init_roll": {
+          "name": "combatants_init_roll",
+          "value": "(\"encounter_combatants\".\"initiative_roll\" is null or \"encounter_combatants\".\"initiative_roll\" between 1 and 20)"
+        },
+        "combatants_init_mode": {
+          "name": "combatants_init_mode",
+          "value": "\"encounter_combatants\".\"initiative_mode\" in ('total', 'roll')"
+        },
+        "combatants_tie_rank": {
+          "name": "combatants_tie_rank",
+          "value": "\"encounter_combatants\".\"tie_rank\" >= 0"
+        },
+        "combatants_turn_policy": {
+          "name": "combatants_turn_policy",
+          "value": "\"encounter_combatants\".\"turn_policy\" in ('default', 'include', 'exclude')"
+        },
+        "combatants_exhaustion": {
+          "name": "combatants_exhaustion",
+          "value": "\"encounter_combatants\".\"exhaustion_level\" between 0 and 6"
+        }
+      }
+    },
+    "condition_applications": {
+      "name": "condition_applications",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "encounter_id": {
+          "name": "encounter_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_combatant_id": {
+          "name": "target_combatant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "condition_key": {
+          "name": "condition_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_combatant_id": {
+          "name": "source_combatant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_label": {
+          "name": "source_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "effect_id": {
+          "name": "effect_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "conditions_encounter_target": {
+          "name": "conditions_encounter_target",
+          "columns": [
+            "encounter_id",
+            "target_combatant_id"
+          ],
+          "isUnique": false
+        },
+        "conditions_encounter_source": {
+          "name": "conditions_encounter_source",
+          "columns": [
+            "encounter_id",
+            "source_combatant_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "condition_applications_encounter_id_encounters_id_fk": {
+          "name": "condition_applications_encounter_id_encounters_id_fk",
+          "tableFrom": "condition_applications",
+          "tableTo": "encounters",
+          "columnsFrom": [
+            "encounter_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "condition_applications_encounter_id_target_combatant_id_encounter_combatants_encounter_id_id_fk": {
+          "name": "condition_applications_encounter_id_target_combatant_id_encounter_combatants_encounter_id_id_fk",
+          "tableFrom": "condition_applications",
+          "tableTo": "encounter_combatants",
+          "columnsFrom": [
+            "encounter_id",
+            "target_combatant_id"
+          ],
+          "columnsTo": [
+            "encounter_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "condition_applications_encounter_id_source_combatant_id_encounter_combatants_encounter_id_id_fk": {
+          "name": "condition_applications_encounter_id_source_combatant_id_encounter_combatants_encounter_id_id_fk",
+          "tableFrom": "condition_applications",
+          "tableTo": "encounter_combatants",
+          "columnsFrom": [
+            "encounter_id",
+            "source_combatant_id"
+          ],
+          "columnsTo": [
+            "encounter_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "conditions_key": {
+          "name": "conditions_key",
+          "value": "\"condition_applications\".\"condition_key\" in ('blinded', 'charmed', 'deafened', 'frightened', 'grappled', 'incapacitated', 'invisible', 'paralyzed', 'petrified', 'poisoned', 'prone', 'restrained', 'stunned', 'unconscious')"
+        }
+      }
+    },
+    "encounters": {
+      "name": "encounters",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "round": {
+          "name": "round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "active_combatant_id": {
+          "name": "active_combatant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "schedule_json": {
+          "name": "schedule_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "concentrations_json": {
+          "name": "concentrations_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "timing_json": {
+          "name": "timing_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{\"boundaryId\":0,\"lastRoundEnd\":0,\"effects\":[],\"reminders\":[],\"occurrences\":[]}'"
+        },
+        "last_turn_checkpoint_json": {
+          "name": "last_turn_checkpoint_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rules_version": {
+          "name": "rules_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skip_zero_hp_enemies": {
+          "name": "skip_zero_hp_enemies",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "encounters_one_active": {
+          "name": "encounters_one_active",
+          "columns": [
+            "(1)"
+          ],
+          "isUnique": true,
+          "where": "\"encounters\".\"status\" = 'active'"
+        },
+        "encounters_status_archived_updated": {
+          "name": "encounters_status_archived_updated",
+          "columns": [
+            "status",
+            "archived_at",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "encounters_name": {
+          "name": "encounters_name",
+          "value": "length(\"encounters\".\"name\") > 0"
+        },
+        "encounters_status": {
+          "name": "encounters_status",
+          "value": "\"encounters\".\"status\" in ('draft', 'active', 'paused', 'completed')"
+        },
+        "encounters_round": {
+          "name": "encounters_round",
+          "value": "\"encounters\".\"round\" >= 0"
+        },
+        "encounters_version": {
+          "name": "encounters_version",
+          "value": "\"encounters\".\"version\" >= 1"
+        },
+        "encounters_active_not_archived": {
+          "name": "encounters_active_not_archived",
+          "value": "not (\"encounters\".\"status\" = 'active' and \"encounters\".\"archived_at\" is not null)"
+        }
+      }
+    },
+    "combatant_templates": {
+      "name": "combatant_templates",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "class_name": {
+          "name": "class_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "level": {
+          "name": "level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "max_hp": {
+          "name": "max_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "starting_hp": {
+          "name": "starting_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "starting_temp_hp": {
+          "name": "starting_temp_hp",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "armor_class": {
+          "name": "armor_class",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "initiative_modifier": {
+          "name": "initiative_modifier",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "speed_ft": {
+          "name": "speed_ft",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "passive_perception": {
+          "name": "passive_perception",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "tags_json": {
+          "name": "tags_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "templates_kind_archived": {
+          "name": "templates_kind_archived",
+          "columns": [
+            "kind",
+            "archived_at"
+          ],
+          "isUnique": false
+        },
+        "templates_name": {
+          "name": "templates_name",
+          "columns": [
+            "name"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "templates_kind": {
+          "name": "templates_kind",
+          "value": "\"combatant_templates\".\"kind\" in ('player', 'enemy', 'npc')"
+        },
+        "templates_name": {
+          "name": "templates_name",
+          "value": "length(\"combatant_templates\".\"name\") > 0"
+        },
+        "templates_level": {
+          "name": "templates_level",
+          "value": "(\"combatant_templates\".\"level\" is null or \"combatant_templates\".\"level\" between 1 and 20)"
+        },
+        "templates_max_hp": {
+          "name": "templates_max_hp",
+          "value": "\"combatant_templates\".\"max_hp\" between 1 and 1000000"
+        },
+        "templates_starting_hp": {
+          "name": "templates_starting_hp",
+          "value": "(\"combatant_templates\".\"starting_hp\" is null or \"combatant_templates\".\"starting_hp\" between 0 and \"combatant_templates\".\"max_hp\")"
+        },
+        "templates_starting_temp_hp": {
+          "name": "templates_starting_temp_hp",
+          "value": "\"combatant_templates\".\"starting_temp_hp\" between 0 and 1000000"
+        },
+        "templates_ac": {
+          "name": "templates_ac",
+          "value": "\"combatant_templates\".\"armor_class\" between 0 and 1000"
+        },
+        "templates_init_mod": {
+          "name": "templates_init_mod",
+          "value": "\"combatant_templates\".\"initiative_modifier\" between -1000 and 1000"
+        },
+        "templates_speed": {
+          "name": "templates_speed",
+          "value": "\"combatant_templates\".\"speed_ft\" between 0 and 1000000"
+        },
+        "templates_pp": {
+          "name": "templates_pp",
+          "value": "(\"combatant_templates\".\"passive_perception\" is null or \"combatant_templates\".\"passive_perception\" between 0 and 1000)"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {
+      "encounters_one_active": {
+        "columns": {
+          "(1)": {
+            "isExpression": true
+          }
+        }
+      }
+    }
+  }
+}

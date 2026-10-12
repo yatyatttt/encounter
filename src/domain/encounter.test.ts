@@ -411,3 +411,124 @@ describe('duplicate', () => {
     expect(JSON.stringify(s)).toBe(before);
   });
 });
+
+describe('concentration (PRD 15.1)', () => {
+  const caster = () => started([{ name: 'Mage', init: 20 }, { name: 'Target', init: 10 }]);
+  const begin = (s: EncounterState, combatantId: string, name = 'Hold Person', replace = false) =>
+    act(s, { type: 'START_CONCENTRATION', combatantId, name, replace });
+
+  it.each([[9, 10], [25, 12], [60, 30], [100, 30]])('creates DC %i damage -> %i from resolved damage, including temp HP', (damage, dc) => {
+    let { s, ids } = caster();
+    s = act(s, { type: 'SET_TEMP_HP', combatantId: ids.Mage, value: 200 });
+    s = begin(s, ids.Mage);
+    const prev = structuredClone(s);
+    s = act(s, { type: 'APPLY_DAMAGE', combatantId: ids.Mage, amount: damage });
+    expect(s.concentrations[0].checks).toMatchObject([{ damage, dc }]);
+    expect(s.combatants[0].currentHp).toBe(20);
+    expect(prev.concentrations[0].checks).toEqual([]);
+  });
+
+  it('keeps separate durable prompts; corrections, healing and zero damage do not create checks', () => {
+    let { s, ids } = caster();
+    s = begin(s, ids.Mage);
+    const boundary = { version: s.version, round: s.round, activeCombatantId: s.activeId };
+    expect(s.concentrations[0].startBoundary).toEqual(boundary);
+    for (const amount of [9, 25]) s = act(s, { type: 'APPLY_DAMAGE', combatantId: ids.Mage, amount });
+    for (const cmd of [
+      { type: 'SET_HP', combatantId: ids.Mage, value: 0 },
+      { type: 'APPLY_HEALING', combatantId: ids.Mage, amount: 3 },
+      { type: 'SET_MAX_HP', combatantId: ids.Mage, value: 12 },
+      { type: 'SET_TEMP_HP', combatantId: ids.Mage, value: 20 },
+      { type: 'APPLY_DAMAGE', combatantId: ids.Mage, amount: 0 },
+    ] as Cmd[]) s = act(s, cmd);
+    expect(s.concentrations[0].checks.map((c) => c.dc)).toEqual([10, 12]);
+    expect(new Set(s.concentrations[0].checks.map((c) => c.id)).size).toBe(2);
+    const { id, checks } = s.concentrations[0];
+    s = act(s, { type: 'RESOLVE_CONCENTRATION_CHECK', concentrationId: id, checkId: checks[0].id, outcome: 'success' });
+    expect(s.concentrations[0].checks).toEqual([checks[1]]);
+    expect(code(() => act(s, { type: 'RESOLVE_CONCENTRATION_CHECK', concentrationId: id, checkId: checks[0].id, outcome: 'success' }))).toBe('NOT_FOUND');
+    s = act(s, { type: 'RESOLVE_CONCENTRATION_CHECK', concentrationId: id, checkId: checks[1].id, outcome: 'failure' });
+    expect(s.concentrations).toEqual([]);
+  });
+
+  it.each(['manual', 'death', 'replace', 'failure'] as const)('ends only linked applications on %s', (reason) => {
+    let { s, ids } = caster();
+    s = begin(s, ids.Mage);
+    s = begin(s, ids.Target, 'Bless');
+    const concentration = s.concentrations[0];
+    s = act(s, { type: 'ADD_CONCENTRATION_EFFECT', concentrationId: concentration.id, name: 'Secondary effect' });
+    for (const effect of s.concentrations[0].linkedEffects) {
+      s = act(s, { type: 'ADD_CONDITION', combatantId: ids.Target, conditionKey: 'poisoned', sourceLabel: effect.name, notes: '', effectId: effect.id });
+    }
+    s = act(s, { type: 'ADD_CONDITION', combatantId: ids.Target, conditionKey: 'poisoned', sourceLabel: 'Independent poison', notes: '' });
+    const unrelated = structuredClone(s.concentrations[1]);
+    s = act(s, { type: 'ADD_CONDITION', combatantId: ids.Target, conditionKey: 'poisoned', sourceLabel: 'Unrelated spell', notes: '', effectId: unrelated.linkedEffects[0].id });
+    if (reason === 'replace') {
+      expect(code(() => begin(s, ids.Mage, 'Fly'))).toBe('INVALID_STATE');
+      s = begin(s, ids.Mage, 'Fly', true);
+    } else if (reason === 'failure') {
+      s = act(s, { type: 'APPLY_DAMAGE', combatantId: ids.Mage, amount: 4 });
+      s = act(s, { type: 'RESOLVE_CONCENTRATION_CHECK', concentrationId: concentration.id, checkId: s.concentrations[0].checks[0].id, outcome: 'failure' });
+    } else s = act(s, { type: 'END_CONCENTRATION', concentrationId: concentration.id, reason });
+    expect(s.conditions.map((c) => c.sourceLabel)).toEqual(['Independent poison', 'Unrelated spell']);
+    expect(s.concentrations.find((c) => c.id === unrelated.id)).toEqual(unrelated);
+    expect(s.concentrations.some((c) => c.id === concentration.id)).toBe(false);
+  });
+
+  it.each(['incapacitated', 'paralyzed', 'petrified', 'stunned', 'unconscious'] as const)('ends concentration for effective %s without inventing a derived row', (conditionKey) => {
+    let { s, ids } = caster();
+    s = begin(s, ids.Mage);
+    s = act(s, { type: 'ADD_CONDITION', combatantId: ids.Mage, conditionKey, sourceLabel: 'Enemy', notes: '' });
+    expect(s.concentrations).toEqual([]);
+    expect(s.conditions.map((c) => c.conditionKey)).toEqual([conditionKey]);
+    expect(code(() => begin(s, ids.Mage))).toBe('INVALID_STATE');
+  });
+
+  it('requires an explicit keep/end choice on removal, and never clears temp HP', () => {
+    let { s, ids } = caster();
+    s = act(s, { type: 'SET_TEMP_HP', combatantId: ids.Mage, value: 8 });
+    s = begin(s, ids.Mage);
+    expect(code(() => act(s, { type: 'REMOVE_COMBATANT', combatantId: ids.Mage }))).toBe('VALIDATION');
+    const kept = act(s, { type: 'REMOVE_COMBATANT', combatantId: ids.Mage, concentrationPolicy: 'keep' });
+    expect(kept.concentrations).toEqual(s.concentrations);
+    s = act(s, { type: 'REMOVE_COMBATANT', combatantId: ids.Mage, concentrationPolicy: 'end' });
+    expect(s.concentrations).toEqual([]);
+    expect(s.combatants[0].tempHp).toBe(8);
+  });
+
+  it('keeps concentration checks through turn advance/reversal, but resolving a save clears Previous Turn', () => {
+    let { s, ids } = caster();
+    s = begin(s, ids.Mage);
+    s = act(s, { type: 'APPLY_DAMAGE', combatantId: ids.Mage, amount: 9 });
+    const concentration = structuredClone(s.concentrations[0]);
+    s = next(s);
+    expect(s.concentrations).toEqual([concentration]);
+    s = act(s, { type: 'PREVIOUS_TURN' });
+    expect(s.concentrations).toEqual([concentration]);
+    s = act(next(s), { type: 'RESOLVE_CONCENTRATION_CHECK', concentrationId: concentration.id, checkId: concentration.checks[0].id, outcome: 'success' });
+    expect(toSnapshot(s).canPreviousTurn).toBe(false);
+  });
+
+  it('preserves concentration on exclusion and completion, and makes completed saves read-only', () => {
+    let { s, ids } = caster();
+    s = begin(s, ids.Mage);
+    s = act(s, { type: 'APPLY_DAMAGE', combatantId: ids.Mage, amount: 9 });
+    const concentration = structuredClone(s.concentrations[0]);
+    s = act(s, { type: 'SET_TURN_POLICY', combatantId: ids.Mage, policy: 'exclude' });
+    expect(s.concentrations).toEqual([concentration]);
+    s = act(s, { type: 'COMPLETE_COMBAT' });
+    expect(s.concentrations).toEqual([concentration]);
+    expect(code(() => act(s, { type: 'RESOLVE_CONCENTRATION_CHECK', concentrationId: concentration.id, checkId: concentration.checks[0].id, outcome: 'success' }))).toBe('INVALID_STATE');
+    expect(code(() => act(s, { type: 'END_CONCENTRATION', concentrationId: concentration.id }))).toBe('INVALID_STATE');
+  });
+
+  it('rejects unknown effect links, and duplicates conditions without live concentration links', () => {
+    let { s, ids } = caster();
+    expect(code(() => act(s, { type: 'ADD_CONDITION', combatantId: ids.Target, conditionKey: 'poisoned', sourceLabel: '', notes: '', effectId: 'missing' }))).toBe('NOT_FOUND');
+    s = begin(s, ids.Mage);
+    s = act(s, { type: 'ADD_CONDITION', combatantId: ids.Target, conditionKey: 'poisoned', sourceLabel: 'Spell', notes: '', effectId: s.concentrations[0].linkedEffects[0].id });
+    const copy = duplicateEncounter(s, { hpSource: 'starting', copyConditions: true }, ctx());
+    expect(copy.concentrations).toEqual([]);
+    expect(copy.conditions).toMatchObject([{ effectId: null }]);
+  });
+});

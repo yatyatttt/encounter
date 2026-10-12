@@ -111,7 +111,70 @@ export type ConditionDto = {
   sourceCombatantId: string | null;
   sourceLabel: string;
   notes: string;
+  effectId: string | null; // internal duration or legacy concentration link; UI edits the condition directly
 };
+
+export const ConcentrationSchema = z.strictObject({
+  id: z.uuid(), combatantId: z.uuid(), name: z.string().trim().min(1).max(200),
+  startedAt: int(0, Number.MAX_SAFE_INTEGER),
+  startBoundary: z.strictObject({ version: int(1, Number.MAX_SAFE_INTEGER), round: int(0, 1_000_000), activeCombatantId: z.uuid().nullable() }),
+  linkedEffects: z.array(z.strictObject({ id: z.uuid(), name: z.string().trim().min(1).max(200) })).min(1).max(200),
+  checks: z.array(z.strictObject({ id: z.uuid(), damage: int(1, 1_000_000), dc: int(10, 30), createdVersion: int(1, Number.MAX_SAFE_INTEGER) })),
+});
+export type ConcentrationDto = z.infer<typeof ConcentrationSchema>;
+export const ConcentrationsSchema = z.array(ConcentrationSchema).max(MAX_COMBATANTS);
+
+// Durations use explicit boundaries, independently of the creature that created an effect.
+export const BoundaryKind = z.enum(['TURN_END', 'ROUND_END', 'ROUND_START', 'TURN_START', 'ENCOUNTER_END']);
+export type BoundaryKind = z.infer<typeof BoundaryKind>;
+export const SaveAbility = z.enum(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
+export const EffectDuration = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('manual') }),
+  z.strictObject({ kind: z.literal('next-turn'), anchorCombatantId: z.uuid(), phase: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('rounds'), count: int(1, 1000), anchorCombatantId: z.uuid().nullable(), phase: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('concentration'), concentrationId: z.uuid() }),
+  z.strictObject({ kind: z.literal('save-ends'), phase: z.enum(['start', 'end']), ability: SaveAbility, dc: int(1, 1000).nullable() }),
+  z.strictObject({ kind: z.literal('encounter-end') }),
+]);
+export type EffectDuration = z.infer<typeof EffectDuration>;
+export const EffectInput = z.strictObject({
+  name: z.string().trim().min(1).max(200), sourceCombatantId: z.uuid().nullable(),
+  targetCombatantIds: z.array(z.uuid()).min(1).max(MAX_COMBATANTS), duration: EffectDuration,
+});
+export type EffectInput = z.infer<typeof EffectInput>;
+export const EffectSchema = EffectInput.extend({
+  id: z.uuid(), createdVersion: int(1, Number.MAX_SAFE_INTEGER), createdBoundaryId: int(0, Number.MAX_SAFE_INTEGER),
+  armedBoundaryId: int(0, Number.MAX_SAFE_INTEGER).nullable(), expiresRound: int(1, 1_001_000).nullable(),
+});
+export type EffectDto = z.infer<typeof EffectSchema>;
+export const ReminderTrigger = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('turn'), anchorCombatantId: z.uuid(), phase: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('round'), phase: z.enum(['start', 'end']) }),
+]);
+export type ReminderTrigger = z.infer<typeof ReminderTrigger>;
+export const ReminderKind = z.enum(['saving-throw', 'damage', 'feature', 'note']);
+export const ReminderInput = z.strictObject({
+  name: z.string().trim().min(1).max(200), notes: z.string().max(2000), kind: ReminderKind,
+  trigger: ReminderTrigger, repeat: z.boolean(), effectId: z.uuid().nullable(),
+});
+export type ReminderInput = z.infer<typeof ReminderInput>;
+export const ReminderSchema = ReminderInput.extend({
+  id: z.uuid(), createdVersion: int(1, Number.MAX_SAFE_INTEGER), createdBoundaryId: int(0, Number.MAX_SAFE_INTEGER), enabled: z.boolean(),
+});
+export type ReminderDto = z.infer<typeof ReminderSchema>;
+export const OccurrenceSchema = z.strictObject({
+  id: z.uuid(), reminderId: z.uuid().nullable(), effectId: z.uuid().nullable(), targetCombatantId: z.uuid().nullable(),
+  name: z.string().min(1).max(200), notes: z.string().max(2400), kind: ReminderKind,
+  boundaryId: int(1, Number.MAX_SAFE_INTEGER), triggerKind: BoundaryKind,
+  round: int(0, 1_000_000), status: z.enum(['pending', 'acknowledged', 'resolved']),
+  outcome: z.enum(['done', 'success', 'failure', 'effect-ended', 'disabled']).nullable(),
+});
+export type ReminderOccurrence = z.infer<typeof OccurrenceSchema>;
+export const TimingSchema = z.strictObject({
+  boundaryId: int(0, Number.MAX_SAFE_INTEGER), lastRoundEnd: int(0, 1_000_000),
+  effects: z.array(EffectSchema).max(500), reminders: z.array(ReminderSchema).max(500), occurrences: z.array(OccurrenceSchema),
+});
+export type TimingDto = z.infer<typeof TimingSchema>;
 
 export type ScheduleDto = {
   pendingIds: string[]; // remaining turns this round, in order (does not include activeId)
@@ -134,6 +197,9 @@ export type EncounterSnapshot = {
   rulesVersion: string;
   combatants: CombatantDto[]; // includes removed (removedAt != null); sorted by current-round display order
   conditions: ConditionDto[];
+  concentrations: ConcentrationDto[];
+  timing: TimingDto;
+  nextTurnConsequences: string[];
   startedAt: number | null;
   completedAt: number | null;
   archivedAt: number | null;
@@ -196,7 +262,7 @@ export const EncounterCommand = z.discriminatedUnion('type', [
   z.object({ type: z.literal('UPDATE_METADATA'), name: z.string().trim().min(1).max(200).optional(), notes: z.string().max(20_000).optional(), skipZeroHpEnemies: z.boolean().optional() }),
   z.object({ type: z.literal('ADD_COMBATANTS'), entries: z.array(AddEntry).min(1), joinPolicy: JoinPolicy.default('next-round') }),
   z.object({ type: z.literal('UPDATE_COMBATANT'), combatantId: id, patch: EditableCombatantPatch }),
-  z.object({ type: z.literal('REMOVE_COMBATANT'), combatantId: id }),
+  z.object({ type: z.literal('REMOVE_COMBATANT'), combatantId: id, concentrationPolicy: z.enum(['keep', 'end']).optional() }),
   z.object({ type: z.literal('REINSTATE_COMBATANT'), combatantId: id, joinPolicy: JoinPolicy.default('next-round') }),
   z.object({ type: z.literal('SET_TURN_POLICY'), combatantId: id, policy: TurnPolicy }),
   z.object({ type: z.literal('SET_INITIATIVE'), entries: z.array(InitiativeEntry).min(1) }), // shared initiative = several entries with the same total
@@ -207,7 +273,19 @@ export const EncounterCommand = z.discriminatedUnion('type', [
   z.object({ type: z.literal('SET_MAX_HP'), combatantId: id, value: int(1, 1_000_000) }), // clamps current/starting HP down if needed
   z.object({ type: z.literal('GRANT_TEMP_HP'), combatantId: id, amount: int(0, 1_000_000), choice: z.enum(['keep', 'replace']) }),
   z.object({ type: z.literal('SET_TEMP_HP'), combatantId: id, value: int(0, 1_000_000) }),
-  z.object({ type: z.literal('ADD_CONDITION'), combatantId: id, conditionKey: ConditionKey, sourceCombatantId: id.optional(), sourceLabel: z.string().max(200).default(''), notes: z.string().max(2000).default('') }),
+  z.object({ type: z.literal('ADD_CONDITION'), combatantId: id, conditionKey: ConditionKey, sourceCombatantId: id.optional(), sourceLabel: z.string().max(200).default(''), notes: z.string().max(2000).default(''), effectId: id.optional(), duration: EffectDuration.optional() }),
+  z.object({ type: z.literal('UPDATE_CONDITION'), applicationId: id, sourceCombatantId: id.nullable(), sourceLabel: z.string().max(200), notes: z.string().max(2000), duration: EffectDuration }),
+  z.object({ type: z.literal('START_CONCENTRATION'), combatantId: id, name: z.string().trim().min(1).max(200), replace: z.boolean().optional() }),
+  z.object({ type: z.literal('END_CONCENTRATION'), concentrationId: id, reason: z.enum(['manual', 'death']).optional() }),
+  z.object({ type: z.literal('ADD_CONCENTRATION_EFFECT'), concentrationId: id, name: z.string().trim().min(1).max(200) }),
+  z.object({ type: z.literal('RESOLVE_CONCENTRATION_CHECK'), concentrationId: id, checkId: id, outcome: z.enum(['success', 'failure']) }),
+  z.object({ type: z.literal('CREATE_EFFECT'), effect: EffectInput }),
+  z.object({ type: z.literal('UPDATE_EFFECT'), effectId: id, effect: EffectInput }),
+  z.object({ type: z.literal('END_EFFECT'), effectId: id }),
+  z.object({ type: z.literal('CREATE_REMINDER'), reminder: ReminderInput }),
+  z.object({ type: z.literal('DISABLE_REMINDER'), reminderId: id }),
+  z.object({ type: z.literal('ACKNOWLEDGE_REMINDER'), occurrenceId: id }),
+  z.object({ type: z.literal('RESOLVE_REMINDER'), occurrenceId: id, outcome: z.enum(['done', 'success', 'failure']) }),
   z.object({ type: z.literal('REMOVE_CONDITION'), applicationId: id }),
   z.object({ type: z.literal('REMOVE_ALL_CONDITION_SOURCES'), combatantId: id, conditionKey: ConditionKey }),
   z.object({ type: z.literal('SET_EXHAUSTION'), combatantId: id, level: int(0, 6) }),

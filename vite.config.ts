@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(__dirname, 'src/web') } },
   build: { outDir: '../../dist', emptyOutDir: true },
-  server: { host: '127.0.0.1', port: 5173, proxy: { '/api': 'http://127.0.0.1:8787' } },
+  // Require the slash so the frontend module /api.ts stays with Vite.
+  server: { host: '127.0.0.1', port: 5173, proxy: { '/api/': 'http://127.0.0.1:8787' } },
   test: { root: '.', include: ['src/**/*.test.ts', 'src/**/*.test.tsx'] },
 });

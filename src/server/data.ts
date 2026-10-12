@@ -3,7 +3,9 @@
 import { z } from 'zod';
 import { CheckpointSchema, ScheduleSchema } from '../domain/encounter';
 import { AppError } from '../domain/errors';
-import { CombatantFields, ConditionKey, EncounterStatus, RestorePreview, TurnPolicy } from '../shared/contract';
+import { concentrationDc, isIncapacitated } from '../domain/concentration';
+import { CombatantFields, ConditionKey, ConcentrationsSchema, EncounterStatus, RestorePreview, TurnPolicy, TimingSchema } from '../shared/contract';
+import { emptyTiming } from '../domain/timing';
 import { combatants, conditions, encounters, templates } from './schema';
 import type { Db } from './repo';
 
@@ -28,6 +30,8 @@ const EncounterRow = z.strictObject({
   id: Id, name: z.string().min(1).max(200), notes: z.string().max(20_000), status: EncounterStatus, round: I(0, 1_000_000),
   activeCombatantId: Id.nullable(),
   scheduleJson: z.string().refine(jsonOk(ScheduleSchema), 'Invalid schedule'),
+  concentrationsJson: z.string().refine(jsonOk(ConcentrationsSchema), 'Invalid concentrations').default('[]'),
+  timingJson: z.string().refine(jsonOk(TimingSchema), 'Invalid effects and reminders').default(JSON.stringify(emptyTiming())),
   lastTurnCheckpointJson: z.string().refine(jsonOk(CheckpointSchema), 'Invalid checkpoint').nullable(),
   rulesVersion: z.string().min(1).max(100), skipZeroHpEnemies: z.boolean(), version: I(1, Number.MAX_SAFE_INTEGER),
   startedAt: Ts.nullable(), completedAt: Ts.nullable(), archivedAt: Ts.nullable(), createdAt: Ts, updatedAt: Ts,
@@ -43,6 +47,7 @@ const CombatantRow = CombatantFields.extend({
 const ConditionRow = z.strictObject({
   id: Id, encounterId: Id, targetCombatantId: Id, conditionKey: ConditionKey, sourceCombatantId: Id.nullable(),
   sourceLabel: z.string().max(200), notes: z.string().max(2000),
+  effectId: Id.nullable().default(null),
 });
 
 const ExportFile = z.strictObject({
@@ -91,7 +96,48 @@ function relationshipProblem(t: Tables): string | null {
   if (t.encounters.some((e) => e.activeCombatantId !== null && !members.has(`${e.id}/${e.activeCombatantId}`))) return 'active combatant is not in its encounter';
   if (t.combatants.some((c) => !encounterIds.has(c.encounterId) || (c.templateId !== null && !templateIds.has(c.templateId)))) return 'combatant references a missing encounter or template';
   const bad = t.conditions.some((k) => !members.has(`${k.encounterId}/${k.targetCombatantId}`) || (k.sourceCombatantId !== null && !members.has(`${k.encounterId}/${k.sourceCombatantId}`)));
-  return bad ? 'condition references a combatant outside its encounter' : null;
+  if (bad) return 'condition references a combatant outside its encounter';
+  for (const e of t.encounters) {
+    const cs = ConcentrationsSchema.parse(JSON.parse(e.concentrationsJson));
+    const timing = TimingSchema.parse(JSON.parse(e.timingJson));
+    const effects = [...cs.flatMap((c) => c.linkedEffects.map((effect) => ({ ...effect, combatantId: c.combatantId, targets: null as string[] | null }))), ...timing.effects.map((f) => ({ ...f, combatantId: f.sourceCombatantId, targets: f.targetCombatantIds }))];
+    const checks = cs.flatMap((c) => c.checks);
+    if (!unique(cs.map((c) => c.id)) || !unique(cs.map((c) => c.combatantId)) || !unique(effects.map((f) => f.id)) || !unique(checks.map((c) => c.id))) return 'duplicate concentration, caster, effect, or check ids';
+    const conditions = t.conditions.filter((k) => k.encounterId === e.id);
+    if (cs.some((c) => !members.has(`${e.id}/${c.combatantId}`))) return 'concentration caster is outside its encounter';
+    if (cs.some((c) => isIncapacitated(conditions, c.combatantId))) return 'an Incapacitated combatant is concentrating';
+    if (cs.some((c) => c.startBoundary.version > e.version || c.checks.some((k) => k.createdVersion < c.startBoundary.version || k.createdVersion > e.version || k.dc !== concentrationDc(k.damage)))) return 'invalid concentration boundary or check DC';
+    if (cs.some((c) => c.startBoundary.activeCombatantId !== null && !members.has(`${e.id}/${c.startBoundary.activeCombatantId}`))) return 'concentration start boundary references a combatant outside its encounter';
+    if (conditions.some((k) => k.effectId !== null && !effects.some((f) => f.id === k.effectId && f.combatantId === k.sourceCombatantId && (f.targets === null || f.targets.includes(k.targetCombatantId))))) return 'condition references a missing or mismatched effect';
+    const member = (id: string | null) => id === null || members.has(`${e.id}/${id}`);
+    if (timing.lastRoundEnd > e.round || !unique([...effects.map((f) => f.id), ...timing.reminders.map((r) => r.id)]) || !unique(timing.occurrences.map((o) => o.id))) return 'invalid or duplicate timing records';
+    for (const f of timing.effects) {
+      if (!member(f.sourceCombatantId) || f.targetCombatantIds.some((id) => !member(id)) || !unique(f.targetCombatantIds)) return 'effect source or targets are invalid';
+      if (f.createdVersion > e.version || f.createdBoundaryId > timing.boundaryId || (f.armedBoundaryId !== null && (f.armedBoundaryId <= f.createdBoundaryId || f.armedBoundaryId > timing.boundaryId))) return 'effect boundary is invalid';
+      const d = f.duration;
+      if ((d.kind === 'rounds') !== (f.expiresRound !== null)) return 'effect expiry round is invalid';
+      if ((d.kind === 'next-turn' || d.kind === 'rounds') && !member(d.anchorCombatantId)) return 'effect anchor is outside its encounter';
+      if (d.kind === 'concentration' && !cs.some((c) => c.id === d.concentrationId && c.combatantId === f.sourceCombatantId)) return 'effect concentration link is invalid';
+    }
+    for (const r of timing.reminders) {
+      if (r.createdVersion > e.version || r.createdBoundaryId > timing.boundaryId || (r.trigger.kind === 'turn' && !member(r.trigger.anchorCombatantId))) return 'reminder boundary or anchor is invalid';
+      if (r.enabled && r.effectId !== null && !timing.effects.some((f) => f.id === r.effectId)) return 'reminder effect is missing';
+    }
+    if (!unique(timing.occurrences.map((o) => `${o.reminderId ?? o.effectId}/${o.boundaryId}/${o.triggerKind}`))) return 'duplicate reminder occurrence';
+    for (const o of timing.occurrences) {
+      if ((!o.reminderId && !o.effectId) || o.boundaryId > timing.boundaryId || !member(o.targetCombatantId) || (o.status === 'resolved') !== (o.outcome !== null)) return 'invalid reminder occurrence';
+      const r = timing.reminders.find((r) => r.id === o.reminderId);
+      if (o.reminderId !== null && !r) return 'reminder occurrence definition is missing';
+      if (r && (o.effectId !== r.effectId || o.kind !== r.kind || o.boundaryId <= r.createdBoundaryId || o.triggerKind !== (r.trigger.kind === 'turn' ? (r.trigger.phase === 'start' ? 'TURN_START' : 'TURN_END') : (r.trigger.phase === 'start' ? 'ROUND_START' : 'ROUND_END')) || o.targetCombatantId !== (r.trigger.kind === 'turn' ? r.trigger.anchorCombatantId : null))) return 'reminder occurrence does not match its definition';
+      if (o.reminderId === null && o.status !== 'resolved' && !timing.effects.some((f) => f.id === o.effectId)) return 'pending save references an ended effect';
+      if (o.reminderId === null && (o.kind !== 'saving-throw' || o.targetCombatantId === null || o.outcome === 'done')) return 'save-ends occurrence is invalid';
+      if (o.reminderId === null && o.status !== 'resolved') {
+        const f = timing.effects.find((f) => f.id === o.effectId);
+        if (!f || f.duration.kind !== 'save-ends' || !f.targetCombatantIds.includes(o.targetCombatantId!) || o.boundaryId <= f.createdBoundaryId || o.triggerKind !== (f.duration.phase === 'start' ? 'TURN_START' : 'TURN_END')) return 'pending save-ends occurrence does not match its effect';
+      }
+    }
+  }
+  return null;
 }
 
 export function previewOf(file: z.infer<typeof ExportFile>): RestorePreview {

@@ -12,6 +12,8 @@ import { Detail } from '@/components/Detail';
 import { AddCombatant } from '@/components/AddCombatant';
 import { DuplicateButton } from '@/components/Duplicate';
 import { cn } from '@/lib/utils';
+import { ConcentrationChecks, ConcentrationRemoval } from '@/components/Concentration';
+import { RemindersManager, ParticipationConditionsNotice } from '@/components/Reminders';
 
 export function Builder() {
   const snap = useStore((s) => s.snapshot)!;
@@ -29,6 +31,7 @@ export function Builder() {
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [shared, setShared] = useDraft('shared-initiative');
   const [removing, setRemoving] = useState<CombatantDto | null>(null);
+  const [concentrationPolicy, setConcentrationPolicy] = useState<'keep' | 'end'>('keep');
   const [initError, setInitError] = useState<string>();
 
   const rows = snap.combatants.filter((c) => c.removedAt === null);
@@ -82,6 +85,8 @@ export function Builder() {
         </div>
       </div>
 
+      <ConcentrationChecks />
+      <RemindersManager />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-w-0 flex-col gap-4">
           <section aria-label="Encounter details" className="grid gap-3 border border-border bg-card p-4 md:grid-cols-2">
@@ -194,8 +199,10 @@ export function Builder() {
       </div>
 
       <AddCombatant open={adding} onOpenChange={setAdding} />
-      <Confirm open={!!removing} onOpenChange={(o) => !o && setRemoving(null)} title={`Remove ${removing?.name}?`} confirmLabel="Remove" onConfirm={() => send({ type: 'REMOVE_COMBATANT', combatantId: removing!.id })}>
+      <Confirm open={!!removing} onOpenChange={(o) => { if (!o) { setRemoving(null); setConcentrationPolicy('keep'); } }} title={`Remove ${removing?.name}?`} confirmLabel="Remove" onConfirm={() => send({ type: 'REMOVE_COMBATANT', combatantId: removing!.id, concentrationPolicy })}>
         Remove <strong>{removing?.name}</strong> from this encounter draft?
+        {removing && <ConcentrationRemoval combatantId={removing.id} value={concentrationPolicy} onChange={setConcentrationPolicy} />}
+        {removing && <ParticipationConditionsNotice combatantId={removing.id} />}
       </Confirm>
     </div>
   );

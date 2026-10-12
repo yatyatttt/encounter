@@ -2,6 +2,7 @@
 // save status, and form drafts that must survive a failed save.
 import { create } from 'zustand';
 import { api, ApiFailure } from './api';
+import { timingAnnouncement } from './timing';
 import type { EncounterCommand, EncounterSnapshot, CommandEnvelope } from '../shared/contract';
 
 export type SaveStatus = 'saved' | 'saving' | 'failed';
@@ -37,6 +38,21 @@ export function hpAnnouncement(before: EncounterSnapshot | null, after: Encounte
     .join(' ');
 }
 
+/** Announce pending saves and concentration changes even if damage changes no current HP. */
+export function concentrationAnnouncement(before: EncounterSnapshot | null, after: EncounterSnapshot): string {
+  if (!before || before.id !== after.id) return '';
+  const name = (id: string) => after.combatants.find((c) => c.id === id)?.name ?? 'Combatant';
+  const ended = before.concentrations.filter((c) => !after.concentrations.some((k) => k.id === c.id));
+  const messages = ended.map((c) => `${name(c.combatantId)}: ${c.name} concentration ended; linked effects ended.`);
+  for (const c of after.concentrations) {
+    const old = before.concentrations.find((k) => k.id === c.id);
+    if (!old) messages.push(`${name(c.combatantId)}: concentrating on ${c.name}.`);
+    for (const check of c.checks.filter((k) => !old?.checks.some((o) => o.id === k.id))) messages.push(`${name(c.combatantId)}: ${check.damage} damage, DC ${check.dc} Constitution save pending.`);
+    if (old?.checks.some((k) => !c.checks.some((o) => o.id === k.id))) messages.push(`${name(c.combatantId)}: concentration check succeeded.`);
+  }
+  return messages.join(' ');
+}
+
 export const useStore = create<Store>((set, get) => {
   const run = async (env: CommandEnvelope, retrying: boolean): Promise<boolean> => {
     const id = get().snapshot!.id;
@@ -44,7 +60,7 @@ export const useStore = create<Store>((set, get) => {
     try {
       const res = await api.command(id, env);
       if (get().snapshot?.id !== id) return true;
-      set({ snapshot: res.snapshot, save: 'saved', failed: null, announcement: hpAnnouncement(get().snapshot, res.snapshot) });
+      set({ snapshot: res.snapshot, save: 'saved', failed: null, announcement: [hpAnnouncement(get().snapshot, res.snapshot), concentrationAnnouncement(get().snapshot, res.snapshot), timingAnnouncement(get().snapshot, res.snapshot)].filter(Boolean).join(' ') });
       return true;
     } catch (e) {
       const err = e instanceof ApiFailure ? e : new ApiFailure('NETWORK', String(e));
