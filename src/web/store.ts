@@ -16,7 +16,7 @@ type Store = {
   fieldErrors: Record<string, string[]> | null;
   notice: string | null; // e.g. version conflict
   announcement: string; // aria-live text
-  failed: CommandEnvelope | null; // envelope to resend on RETRY
+  failed: { encounterId: string; envelope: CommandEnvelope } | null; // original target and envelope for RETRY
   drafts: Record<string, string>;
   open: (id: string) => Promise<void>;
   refetch: () => Promise<void>;
@@ -54,18 +54,28 @@ export function concentrationAnnouncement(before: EncounterSnapshot | null, afte
 }
 
 export const useStore = create<Store>((set, get) => {
-  const run = async (env: CommandEnvelope, retrying: boolean): Promise<boolean> => {
-    const id = get().snapshot!.id;
+  // A visit token also distinguishes A → B → A; encounter IDs alone cannot reject those stale results.
+  let session = 0;
+  let openRequest = 0;
+  const run = async (id: string, env: CommandEnvelope, retrying: boolean): Promise<boolean> => {
+    const owner = session;
+    const isCurrent = () => owner === session && get().snapshot?.id === id;
     set({ save: 'saving', error: null, fieldErrors: null, notice: null, failed: retrying ? get().failed : null });
     try {
       const res = await api.command(id, env);
-      if (get().snapshot?.id !== id) return true;
+      if (!isCurrent()) return false;
       set({ snapshot: res.snapshot, save: 'saved', failed: null, announcement: [hpAnnouncement(get().snapshot, res.snapshot), concentrationAnnouncement(get().snapshot, res.snapshot), timingAnnouncement(get().snapshot, res.snapshot)].filter(Boolean).join(' ') });
       return true;
     } catch (e) {
+      if (!isCurrent()) return false;
       const err = e instanceof ApiFailure ? e : new ApiFailure('NETWORK', String(e));
       if (err.code === 'VERSION_CONFLICT') {
-        try { set({ snapshot: await api.encounter(id) }); } catch { /* the notice below still applies */ }
+        try {
+          const snapshot = await api.encounter(id);
+          if (!isCurrent()) return false;
+          set({ snapshot });
+        } catch { /* the notice below still applies */ }
+        if (!isCurrent()) return false;
         set({
           save: 'saved', failed: null,
           notice: retrying
@@ -75,7 +85,7 @@ export const useStore = create<Store>((set, get) => {
         return false;
       }
       set({
-        save: 'failed', error: err.message, fieldErrors: err.fieldErrors ?? null, failed: env,
+        save: 'failed', error: err.message, fieldErrors: err.fieldErrors ?? null, failed: { encounterId: id, envelope: env },
         announcement: `Save failed. ${err.message}`,
       });
       return false;
@@ -87,32 +97,40 @@ export const useStore = create<Store>((set, get) => {
     notice: null, announcement: '', failed: null, drafts: {},
 
     open: async (id) => {
+      const request = ++openRequest;
       if (get().snapshot?.id !== id) {
+        session++;
         set({ snapshot: null, selectedId: null, save: 'saved', error: null, fieldErrors: null, notice: null, failed: null, drafts: {} });
       }
       set({ loadError: null });
-      try { set({ snapshot: await api.encounter(id) }); } catch (e) { set({ loadError: (e as Error).message }); }
+      try {
+        const snapshot = await api.encounter(id);
+        if (request === openRequest && (!get().snapshot || snapshot.version >= get().snapshot!.version)) set({ snapshot });
+      } catch (e) {
+        if (request === openRequest) set({ loadError: (e as Error).message });
+      }
     },
 
     refetch: async () => {
       const s = get();
+      const owner = session;
       if (!s.snapshot || s.save !== 'saved') return; // never overwrite while saving / failed
       try {
         const next = await api.encounter(s.snapshot.id);
-        if (get().save === 'saved' && get().snapshot?.id === next.id && next.version !== get().snapshot!.version) set({ snapshot: next });
+        if (owner === session && get().save === 'saved' && get().snapshot?.id === next.id && next.version > get().snapshot!.version) set({ snapshot: next });
       } catch { /* a transient focus refetch failure is not a save failure */ }
     },
 
     send: async (command) => {
       const s = get();
       if (!s.snapshot || s.save === 'saving') return false;
-      return run({ expectedVersion: s.snapshot.version, command }, false);
+      return run(s.snapshot.id, { expectedVersion: s.snapshot.version, command }, false);
     },
 
     retry: async () => {
-      const env = get().failed;
-      if (!env || get().save === 'saving') return false;
-      return run(env, true);
+      const failed = get().failed;
+      if (!failed || get().save === 'saving' || get().snapshot?.id !== failed.encounterId) return false;
+      return run(failed.encounterId, failed.envelope, true);
     },
 
     dismissError: () => set({ save: 'saved', error: null, fieldErrors: null, failed: null }),

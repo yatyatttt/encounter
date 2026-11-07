@@ -34,8 +34,13 @@ export function AddCombatant({ open, onOpenChange }: { open: boolean; onOpenChan
 
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => api.templates({ q: q.trim() || undefined }).then((l) => { setTemplates(l); setLoadError(undefined); }).catch((e: Error) => setLoadError(e.message)), 150);
-    return () => clearTimeout(t);
+    let current = true;
+    const timer = setTimeout(() => {
+      api.templates({ q: q.trim() || undefined })
+        .then((templates) => { if (current) { setTemplates(templates); setLoadError(undefined); } })
+        .catch((error: Error) => { if (current) setLoadError(error.message); });
+    }, 150);
+    return () => { current = false; clearTimeout(timer); };
   }, [open, q]);
 
   const modifier = source === 'library' ? picked?.initiativeModifier : Number(form.initiativeModifier) || 0;

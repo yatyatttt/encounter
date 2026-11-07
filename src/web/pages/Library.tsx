@@ -16,15 +16,21 @@ export function Library() {
   const [editing, setEditing] = useState<Template | 'new' | null>(null);
   const [archiving, setArchiving] = useState<Template | null>(null);
 
-  const load = useCallback(() => {
-    api.templates({ q: q.trim() || undefined, kind: kind || undefined, archived })
-      .then((l) => { setList(l); setError(null); })
-      .catch((e: Error) => setError(e.message));
-  }, [q, kind, archived]);
-  useEffect(() => { const t = setTimeout(load, 150); return () => clearTimeout(t); }, [load]);
+  const [reload, setReload] = useState(0);
+  const refresh = useCallback(() => setReload((value) => value + 1), []);
+  useEffect(() => {
+    let current = true;
+    setList(null);
+    const timer = setTimeout(() => {
+      api.templates({ q: q.trim() || undefined, kind: kind || undefined, archived })
+        .then((templates) => { if (current) { setList(templates); setError(null); } })
+        .catch((error: Error) => { if (current) setError(error.message); });
+    }, 150);
+    return () => { current = false; clearTimeout(timer); };
+  }, [q, kind, archived, reload]);
 
   const act = async (fn: () => Promise<unknown>) => {
-    try { await fn(); load(); } catch (e) { setError((e as Error).message); }
+    try { await fn(); refresh(); } catch (e) { setError((e as Error).message); }
   };
 
   return (
@@ -78,7 +84,7 @@ export function Library() {
           </table>
         </div>
       )}
-      {editing && <TemplateDialog template={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {editing && <TemplateDialog template={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
       <Confirm
         open={!!archiving}
         onOpenChange={(o) => !o && setArchiving(null)}

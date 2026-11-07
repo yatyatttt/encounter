@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/api';
 import type { EncounterStatus, EncounterSummary } from '../../shared/contract';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,6 @@ const GROUPS: { status: EncounterStatus; title: string; action: string }[] = [
 ];
 
 export function Dashboard() {
-  const requestId = useRef(0);
   const [list, setList] = useState<EncounterSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [archived, setArchived] = useState(false);
@@ -22,19 +21,23 @@ export function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [archiving, setArchiving] = useState<EncounterSummary | null>(null);
 
-  const load = useCallback(() => {
-    const request = ++requestId.current;
-    api.encounters({ archived }).then((l) => { if (request === requestId.current) { setList(l); setError(null); } })
-      .catch((e: Error) => { if (request === requestId.current) setError(e.message); });
-  }, [archived]);
-  useEffect(() => { load(); }, [load]);
+  const [reload, setReload] = useState(0);
+  const refresh = useCallback(() => setReload((value) => value + 1), []);
+  useEffect(() => {
+    let current = true;
+    setList(null);
+    api.encounters({ archived })
+      .then((encounters) => { if (current) { setList(encounters); setError(null); } })
+      .catch((error: Error) => { if (current) setError(error.message); });
+    return () => { current = false; };
+  }, [archived, reload]);
 
   const unarchive = async (id: string) => {
     setRestoring(id);
     try {
       const snap = await api.encounter(id);
       await api.command(id, { expectedVersion: snap.version, command: { type: 'UNARCHIVE_ENCOUNTER' } });
-      load();
+      refresh();
     } catch (e) { setError((e as Error).message); }
     finally { setRestoring(null); }
   };
@@ -45,8 +48,8 @@ export function Dashboard() {
         <h1 className="label text-sm text-foreground">Dashboard</h1>
         <Button onClick={() => setCreating(true)}>+ New Encounter</Button>
       </div>
-      <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="size-5 accent-primary" checked={archived} onChange={(e) => { requestId.current++; setList(null); setArchived(e.target.checked); }} /> Show archived</label>
-      {error && <p role="alert" className="border border-destructive p-3 text-sm text-destructive">{error} <Button size="sm" variant="outline" onClick={load}>Retry</Button></p>}
+      <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="size-5 accent-primary" checked={archived} onChange={(e) => { setArchived(e.target.checked); }} /> Show archived</label>
+      {error && <p role="alert" className="border border-destructive p-3 text-sm text-destructive">{error} <Button size="sm" variant="outline" onClick={refresh}>Retry</Button></p>}
       {list && list.length === 0 && (
         <div className="border border-border bg-card p-8 text-center">
           <p className="mb-4 text-muted-foreground">{archived ? 'No archived encounters.' : 'No encounters yet.'}</p>
@@ -86,8 +89,8 @@ export function Dashboard() {
           try {
             const snap = await api.encounter(archiving!.id);
             await api.command(snap.id, { expectedVersion: snap.version, command: { type: 'ARCHIVE_ENCOUNTER' } });
-            load();
-          } catch (e) { setError((e as Error).message); load(); }
+            refresh();
+          } catch (e) { setError((e as Error).message); refresh(); }
         }}
       >
         Archive <strong>{archiving?.name}</strong>? It is hidden from the normal dashboard. Use Show archived to find it and unarchive it later.
