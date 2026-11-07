@@ -143,8 +143,8 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
   const affected: string[] = [];
   const running = s.status === 'active' || s.status === 'paused';
 
-  if (s.status === 'completed' && cmd.type !== 'UPDATE_METADATA' && cmd.type !== 'ARCHIVE_ENCOUNTER') {
-    fail('INVALID_STATE', 'Completed encounters are read-only (rename or archive only)');
+  if (s.status === 'completed' && cmd.type !== 'UPDATE_METADATA' && cmd.type !== 'ARCHIVE_ENCOUNTER' && cmd.type !== 'UNARCHIVE_ENCOUNTER') {
+    fail('INVALID_STATE', 'Completed encounters are read-only (rename, archive or unarchive only)');
   }
   const allowed = REQUIRED_STATUS[cmd.type];
   if (allowed && !allowed.includes(s.status)) fail('INVALID_STATE', `${cmd.type} is not allowed while the encounter is ${s.status}`);
@@ -534,6 +534,10 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
       s.completedAt = ctx.now;
       s.activeId = null;
       s.schedule = emptySchedule();
+      break;
+
+    case 'UNARCHIVE_ENCOUNTER':
+      s.archivedAt = null;
       break;
 
     case 'ARCHIVE_ENCOUNTER':

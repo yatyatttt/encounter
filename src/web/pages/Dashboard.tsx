@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/api';
 import type { EncounterStatus, EncounterSummary } from '../../shared/contract';
 import { Button } from '@/components/ui/button';
@@ -14,15 +14,30 @@ const GROUPS: { status: EncounterStatus; title: string; action: string }[] = [
 ];
 
 export function Dashboard() {
+  const requestId = useRef(0);
   const [list, setList] = useState<EncounterSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [archived, setArchived] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [archiving, setArchiving] = useState<EncounterSummary | null>(null);
 
   const load = useCallback(() => {
-    api.encounters().then((l) => { setList(l); setError(null); }).catch((e: Error) => setError(e.message));
-  }, []);
+    const request = ++requestId.current;
+    api.encounters({ archived }).then((l) => { if (request === requestId.current) { setList(l); setError(null); } })
+      .catch((e: Error) => { if (request === requestId.current) setError(e.message); });
+  }, [archived]);
   useEffect(() => { load(); }, [load]);
+
+  const unarchive = async (id: string) => {
+    setRestoring(id);
+    try {
+      const snap = await api.encounter(id);
+      await api.command(id, { expectedVersion: snap.version, command: { type: 'UNARCHIVE_ENCOUNTER' } });
+      load();
+    } catch (e) { setError((e as Error).message); }
+    finally { setRestoring(null); }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -30,11 +45,12 @@ export function Dashboard() {
         <h1 className="label text-sm text-foreground">Dashboard</h1>
         <Button onClick={() => setCreating(true)}>+ New Encounter</Button>
       </div>
+      <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="size-5 accent-primary" checked={archived} onChange={(e) => { requestId.current++; setList(null); setArchived(e.target.checked); }} /> Show archived</label>
       {error && <p role="alert" className="border border-destructive p-3 text-sm text-destructive">{error} <Button size="sm" variant="outline" onClick={load}>Retry</Button></p>}
       {list && list.length === 0 && (
         <div className="border border-border bg-card p-8 text-center">
-          <p className="mb-4 text-muted-foreground">No encounters yet.</p>
-          <Button onClick={() => setCreating(true)}>Create your first encounter</Button>
+          <p className="mb-4 text-muted-foreground">{archived ? 'No archived encounters.' : 'No encounters yet.'}</p>
+          {!archived && <Button onClick={() => setCreating(true)}>Create your first encounter</Button>}
         </div>
       )}
       {GROUPS.map((g) => {
@@ -47,10 +63,12 @@ export function Dashboard() {
               {rows.map((e) => (
                 <li key={e.id} className="flex flex-wrap items-center gap-4 border-b border-border p-3 last:border-b-0">
                   <a href={`#/encounter/${e.id}`} className="min-w-48 flex-1 text-base hover:text-primary">{e.name}</a>
+                  {e.archivedAt !== null && <Badge>Archived</Badge>}
                   {(e.status === 'active' || e.status === 'paused') && <Badge tone={e.status === 'active' ? 'green' : 'amber'}>{e.status} · round {e.round}</Badge>}
                   <span className="text-xs text-muted-foreground">{e.combatantCount} combatants · {new Date(e.updatedAt).toLocaleString()}</span>
                   <Button size="sm" onClick={() => { location.hash = `#/encounter/${e.id}`; }}>{g.action}</Button>
-                  {e.status !== 'active' && <Button size="sm" variant="outline" onClick={() => setArchiving(e)}>Archive</Button>}
+                  {e.archivedAt !== null && <Button size="sm" className="min-h-11" variant="outline" disabled={restoring !== null} onClick={() => void unarchive(e.id)} aria-label={`Unarchive ${e.name}`}>{restoring === e.id ? 'Unarchiving…' : 'Unarchive'}</Button>}
+                  {e.archivedAt === null && e.status !== 'active' && <Button size="sm" variant="outline" onClick={() => setArchiving(e)}>Archive</Button>}
                 </li>
               ))}
             </ul>
@@ -72,7 +90,7 @@ export function Dashboard() {
           } catch (e) { setError((e as Error).message); load(); }
         }}
       >
-        Archive <strong>{archiving?.name}</strong>? It disappears from this list; the data stays in your backups and exports.
+        Archive <strong>{archiving?.name}</strong>? It is hidden from the normal dashboard. Use Show archived to find it and unarchive it later.
       </Confirm>
     </div>
   );

@@ -5,6 +5,7 @@
 //   GET    /templates?kind=&q=&archived=0|1            -> Template[]
 //   POST   /templates            body TemplateInput     -> Template
 //   PATCH  /templates/:id        body Partial<TemplateInput> -> Template
+//   POST   /templates/:id/unarchive                      -> Template
 //   POST   /templates/:id/archive                        -> Template
 //   POST   /templates/:id/duplicate                      -> Template
 //   GET    /encounters?status=&archived=0|1              -> EncounterSummary[]
@@ -296,6 +297,7 @@ export const EncounterCommand = z.discriminatedUnion('type', [
   z.object({ type: z.literal('RESUME_COMBAT') }),
   z.object({ type: z.literal('COMPLETE_COMBAT') }),
   z.object({ type: z.literal('ARCHIVE_ENCOUNTER') }),
+  z.object({ type: z.literal('UNARCHIVE_ENCOUNTER') }),
 ]);
 export type EncounterCommand = z.infer<typeof EncounterCommand>;
 

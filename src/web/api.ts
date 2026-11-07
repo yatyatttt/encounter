@@ -50,6 +50,7 @@ export const api = {
     request<Template[]>('GET', `/templates${qs({ kind: q.kind, q: q.q, archived: q.archived ? '1' : '0' })}`),
   createTemplate: (t: unknown) => request<Template>('POST', '/templates', t as TemplateInput),
   updateTemplate: (id: string, t: unknown) => request<Template>('PATCH', `/templates/${id}`, t),
+  unarchiveTemplate: (id: string) => request<Template>('POST', `/templates/${id}/unarchive`),
   archiveTemplate: (id: string) => request<Template>('POST', `/templates/${id}/archive`),
   duplicateTemplate: (id: string) => request<Template>('POST', `/templates/${id}/duplicate`),
   encounters: (q: { status?: EncounterStatus; archived?: boolean } = {}) =>

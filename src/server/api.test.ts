@@ -63,6 +63,41 @@ async function guardEncounter(call: Call, name = 'Ambush', n = 6) {
 }
 
 describe('API', () => {
+  it('unarchives templates without changing encounter copies', async () => {
+    const { call } = await fixture();
+    const { template, snapshot } = await guardEncounter(call);
+    await call('POST', `/templates/${template.id}/archive`);
+    const restored = await call('POST', `/templates/${template.id}/unarchive`);
+    expect(restored.status).toBe(200);
+    expect(restored.body.archivedAt).toBeNull();
+    expect((await call('GET', '/templates')).body.map((t: Template) => t.id)).toContain(template.id);
+    expect((await call('GET', '/templates?archived=1')).body).toEqual([]);
+    expect((await call('GET', `/encounters/${snapshot.id}`)).body).toEqual(snapshot);
+    expect((await call('POST', `/templates/${crypto.randomUUID()}/unarchive`)).status).toBe(404);
+  });
+
+  it.each(['draft', 'paused', 'completed'])('lists and unarchives a %s encounter with version checks and persistence', async (status) => {
+    const f = await fixture();
+    const { call } = f;
+    let { snapshot: snap } = await guardEncounter(call);
+    if (status !== 'draft') {
+      snap = (await command(call, snap.id, snap.version, { type: 'START_COMBAT' })).body.snapshot;
+      snap = (await command(call, snap.id, snap.version, { type: status === 'paused' ? 'PAUSE_COMBAT' : 'COMPLETE_COMBAT' })).body.snapshot;
+    }
+    const archived = (await command(call, snap.id, snap.version, { type: 'ARCHIVE_ENCOUNTER' })).body.snapshot;
+    expect((await call('GET', '/encounters')).body).toEqual([]);
+    expect((await call('GET', '/encounters?archived=1')).body[0].id).toBe(snap.id);
+    expect((await call('GET', `/encounters/${snap.id}`)).body).toEqual(archived);
+    expect((await command(call, snap.id, snap.version, { type: 'UNARCHIVE_ENCOUNTER' })).status).toBe(409);
+    const restored = await command(call, snap.id, archived.version, { type: 'UNARCHIVE_ENCOUNTER' });
+    expect(restored.status).toBe(200);
+    expect(restored.body.snapshot).toMatchObject({ archivedAt: null, status, version: archived.version + 1, combatants: snap.combatants });
+    expect((await call('GET', '/encounters?archived=1')).body).toEqual([]);
+    expect((await call('GET', '/encounters')).body[0].id).toBe(snap.id);
+    const restarted = await fixture(f.dir);
+    expect((await restarted.call('GET', `/encounters/${snap.id}`)).body).toEqual(restored.body.snapshot);
+  });
+
   it('runs the full scenario and survives a restart', async () => {
     const f = await fixture();
     const { call } = f;

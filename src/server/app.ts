@@ -160,6 +160,14 @@ export function createApp(db: Db, opts: AppOptions): Hono {
     return c.json(next);
   });
 
+  api.post('/templates/:id/unarchive', (c) => {
+    const id = idParam(c);
+    const t = loadTemplate(db, id) ?? (() => { throw notFound('Template'); })();
+    const next = { ...t, archivedAt: null, updatedAt: now() };
+    db.update(templates).set(templateRow(next)).where(eq(templates.id, id)).run();
+    return c.json(next);
+  });
+
   api.post('/templates/:id/duplicate', (c) => {
     const t = loadTemplate(db, idParam(c)) ?? (() => { throw notFound('Template'); })();
     const copy = { ...t, id: randomUUID(), name: `${t.name} (copy)`, archivedAt: null, createdAt: now(), updatedAt: now() };

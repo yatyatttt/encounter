@@ -69,6 +69,7 @@ export function Library() {
                   <td className="whitespace-nowrap p-3 text-right">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(t)} aria-label={`Edit ${t.name}`}>Edit</Button>
                     <Button size="sm" variant="ghost" onClick={() => void act(() => api.duplicateTemplate(t.id))} aria-label={`Duplicate ${t.name}`}>Duplicate</Button>
+                    {t.archivedAt !== null && <Button size="sm" className="min-h-11" variant="ghost" onClick={() => void act(() => api.unarchiveTemplate(t.id))} aria-label={`Unarchive ${t.name}`}>Unarchive</Button>}
                     {!t.archivedAt && <Button size="sm" variant="ghost" onClick={() => setArchiving(t)} aria-label={`Archive ${t.name}`}>Archive</Button>}
                   </td>
                 </tr>
