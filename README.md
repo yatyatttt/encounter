@@ -2,6 +2,8 @@
 
 Local-first D&D 2024 combat manager for a single DM on one machine. Prepare reusable combatants, build encounters, and track initiative, HP, conditions, concentration, and reminders. React + Hono + SQLite; data stays on your machine, with no account or cloud service required. Fonts and assets are bundled locally for offline use after installation.
 
+![Encounter combat tracker showing initiative order, round and turn controls, reminders, and the selected player’s HP details.](docs/images/encounter-tracker.png)
+
 ## Install and run
 
 Requires **Node.js 20 or newer** and npm. Run these commands from the repository directory:
