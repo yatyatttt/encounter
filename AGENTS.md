@@ -40,6 +40,7 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 - `src/shared/contract.ts`: Zod schemas, inferred types, DTOs, constants, and endpoint list. For API changes, update the contract first, then domain/server/web consumers.
 - `src/domain/encounter.ts`: pure state transitions (`applyCommand`), ordering, eligibility, snapshots, and duplication. Inject time, IDs, and template lookup through `Ctx`; keep IO out of the domain.
 - `src/domain/hp.ts`: pure HP math and quick-input parsing, shared with UI previews. Reuse it instead of duplicating calculations.
+- `src/domain/condition-lifecycle.ts`: condition timer assignment/release, effect validation, and concentration cleanup on cloned command state. Preserve shared/legacy links when editing one source.
 - `src/domain/concentration.ts`: concentration DC and effective Incapacitated helpers. Concentration commands remain in `applyCommand`; see `docs/concentration.md` for scope and persistence.
 - `src/domain/timing.ts`: effect expiry and reminder occurrence processing at explicit boundaries. See `docs/effects-and-reminders.md` for duration semantics, source/anchor review, and Previous Turn behavior.
 - `src/server/app.ts`: Hono routes and error/security handling. `createApp(db, opts)` does not listen; `index.ts` owns startup and shutdown.
@@ -52,7 +53,7 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 ## Invariants to preserve
 
 - Each mutation of an existing encounter goes through one `EncounterCommand` to `POST /api/v1/encounters/:id/commands` with `expectedVersion`. The server checks the version, applies the command, and saves in one immediate transaction. A successful command increments the version and returns the authoritative snapshot; stale versions return 409 `VERSION_CONFLICT`.
-- The UI commits only acknowledged snapshots. Preserve drafts after failed saves; retry the original command envelope. On a version conflict, refetch and let the DM review before repeating the change. Do not add optimistic encounter updates or blindly replay commands.
+- The UI commits only acknowledged snapshots. Preserve drafts after failed saves; retry the original command envelope against its original encounter. Ignore stale async results after encounter navigation, including error and conflict-refetch paths. On a version conflict, refetch and let the DM review before repeating the change. Do not add optimistic encounter updates or blindly replay commands.
 - Command receipts/idempotency, dataset IDs, API tokens, multiplayer, and cloud services were deliberately cut. Preserve the loopback bind and Host/Origin checks.
 - Library templates are copied into encounter instances. Editing or archiving a template never changes existing instances. Combatant removal uses tombstones for reinstatement.
 - At most one encounter is active. Completed encounters accept metadata, archive, and unarchive commands only. Archiving hides items from normal lists; archived views allow opening encounters and unarchiving encounters or templates without changing their contents or lifecycle status.
@@ -70,6 +71,7 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 - `src/domain/encounter.test.ts`: HP, initiative, scheduling, roster changes, Previous Turn, conditions, lifecycle, and duplication. Use deterministic injected context and check that previous state stays unchanged.
 - `src/server/api.test.ts`: real SQLite in temporary directories, Hono `app.request()` without a network listener, persistence/restart, version conflicts, security, backups, restore rollback, and static serving. Follow its fixture cleanup and explicit Host header pattern.
 - `src/web/helpers.test.ts`: pure UI helpers. UI previews must agree with domain behavior; use focused regression tests for changed logic.
+- `src/web/store.test.ts`: delayed loads/saves across navigation, conflict recovery, original-target retries, and stale focus refetches.
 - `src/web/concentration.test.ts`: concentration/save announcements from acknowledged snapshots.
 - `src/domain/timing.test.ts` and `src/web/timing.test.ts`: boundary order, durations, reminder identities/statuses, save-ends target cleanup, review behavior, previews, and announcements.
 - `src/web/dev-server.test.ts`: Vite module serving and API proxying using isolated loopback servers and a temporary cache; requires permission to bind local ports.

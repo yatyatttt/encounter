@@ -10,3 +10,7 @@ export class AppError extends Error {
     super(message);
   }
 }
+
+export const fail = (code: ErrorCode, message: string, fieldErrors?: Record<string, string[]>): never => {
+  throw new AppError(code, message, { fieldErrors });
+};

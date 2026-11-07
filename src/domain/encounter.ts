@@ -4,9 +4,10 @@ import { z } from 'zod';
 import {
   MAX_COMBATANTS, RULES_VERSION,
   type CombatantDto, type CombatantFields, type ConditionDto, type ConcentrationDto, type DuplicateOptions, type EncounterCommand,
-  type EncounterSnapshot, type EncounterStatus, type InitiativeInput, type TimingDto, type BoundaryKind, type EffectDuration,
+  type EncounterSnapshot, type EncounterStatus, type InitiativeInput, type TimingDto, type BoundaryKind,
 } from '../shared/contract';
-import { AppError } from './errors';
+import { fail } from './errors';
+import { getCombatant, getLiveCombatant, getConcentration, validateEffect, releaseConditionTimer, setConditionDuration, endConcentration } from './condition-lifecycle';
 import { applyDamage, applyHealing, grantTempHp, type Hp } from './hp';
 import { concentrationDc, isIncapacitated } from './concentration';
 import { emptyTiming, endEffect, expiryRound, processBoundary, type Boundary } from './timing';
@@ -129,10 +130,6 @@ function joinCurrentRound(s: EncounterState, c: Combatant) {
 }
 
 // ---------- commands ----------
-const fail = (code: ConstructorParameters<typeof AppError>[0], message: string, fieldErrors?: Record<string, string[]>): never => {
-  throw new AppError(code, message, { fieldErrors });
-};
-
 const REQUIRED_STATUS: Partial<Record<EncounterCommand['type'], EncounterStatus[]>> = {
   START_COMBAT: ['draft'], NEXT_TURN: ['active'], PREVIOUS_TURN: ['active'], PAUSE_COMBAT: ['active'],
   RESUME_COMBAT: ['paused'], COMPLETE_COMBAT: ['active', 'paused'],
@@ -149,11 +146,8 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
   const allowed = REQUIRED_STATUS[cmd.type];
   if (allowed && !allowed.includes(s.status)) fail('INVALID_STATE', `${cmd.type} is not allowed while the encounter is ${s.status}`);
 
-  const get = (id: string) => s.combatants.find((c) => c.id === id) ?? fail('NOT_FOUND', 'Combatant not found');
-  const live = (id: string) => {
-    const c = get(id);
-    return c.removedAt === null ? c : fail('INVALID_STATE', `${c.name} has been removed from this encounter`);
-  };
+  const get = (id: string) => getCombatant(s, id);
+  const live = (id: string) => getLiveCombatant(s, id);
   const setHp = (c: Combatant, hp: Hp) => {
     c.currentHp = hp.hp;
     c.tempHp = hp.tempHp;
@@ -166,57 +160,6 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
   const boundary = (kind: BoundaryKind, combatantId: string | null = null) => {
     const b: Boundary = { id: ++s.timing.boundaryId, kind, round: s.round, combatantId };
     processBoundary(s, b, affected, ctx.newId);
-  };
-  const validateEffect = (effect: Extract<EncounterCommand, { type: 'CREATE_EFFECT' }>['effect'], existingTargets: string[] = []) => {
-    if (effect.sourceCombatantId) get(effect.sourceCombatantId);
-    if (new Set(effect.targetCombatantIds).size !== effect.targetCombatantIds.length) fail('VALIDATION', 'Effect targets must be unique');
-    // Existing tombstoned targets may be retained for review/reinstatement; new targets must be live.
-    effect.targetCombatantIds.forEach((id) => existingTargets.includes(id) ? get(id) : live(id));
-    const d = effect.duration;
-    if ((d.kind === 'next-turn' || d.kind === 'rounds') && d.anchorCombatantId) get(d.anchorCombatantId);
-    if (d.kind === 'concentration') {
-      const conc = s.concentrations.find((c) => c.id === d.concentrationId) ?? fail('NOT_FOUND', 'Concentration not found');
-      if (effect.sourceCombatantId !== conc.combatantId) fail('VALIDATION', 'A concentration effect must use its caster as source');
-    }
-  };
-  const concentration = (id: string) => s.concentrations.find((c) => c.id === id) ?? fail('NOT_FOUND', 'Concentration not found');
-  const releaseConditionTimer = (condition: ConditionDto) => {
-    const id = condition.effectId;
-    condition.effectId = null;
-    const timer = s.timing.effects.find((e) => e.id === id);
-    if (!timer) return; // legacy concentration links have no independent timer
-    const remaining = s.conditions.filter((c) => c.effectId === id);
-    if (!remaining.length) endEffect(s, timer.id, affected);
-    else if (!remaining.some((c) => c.targetCombatantId === condition.targetCombatantId)) {
-      timer.targetCombatantIds = timer.targetCombatantIds.filter((target) => target !== condition.targetCombatantId);
-      for (const o of s.timing.occurrences) if (o.reminderId === null && o.effectId === id && o.targetCombatantId === condition.targetCombatantId && o.status !== 'resolved') { o.status = 'resolved'; o.outcome = 'effect-ended'; }
-    }
-  };
-  const setConditionDuration = (condition: ConditionDto, duration: EffectDuration) => {
-    const old = s.timing.effects.find((e) => e.id === condition.effectId);
-    const ownTimer = old && old.targetCombatantIds.length === 1 && s.conditions.filter((c) => c.effectId === old.id).length === 1 ? old : undefined;
-    if (!ownTimer) releaseConditionTimer(condition); // editing a legacy shared duration must not change other applications
-    if (duration.kind === 'concentration') condition.sourceCombatantId = concentration(duration.concentrationId).combatantId;
-    const input = { name: `${condition.conditionKey[0].toUpperCase()}${condition.conditionKey.slice(1)} · ${get(condition.targetCombatantId).name}${condition.sourceLabel ? ` · ${condition.sourceLabel}` : ''}`.slice(0, 200), sourceCombatantId: condition.sourceCombatantId, targetCombatantIds: [condition.targetCombatantId], duration };
-    validateEffect(input, [condition.targetCombatantId]); // this application may remain on a tombstoned target
-    const timing = { createdVersion: s.version + 1, createdBoundaryId: s.timing.boundaryId, armedBoundaryId: null, expiresRound: expiryRound(s, duration) };
-    if (ownTimer) {
-      Object.assign(ownTimer, input, timing);
-      for (const o of s.timing.occurrences) if (o.reminderId === null && o.effectId === ownTimer.id && o.status !== 'resolved') { o.status = 'resolved'; o.outcome = 'effect-ended'; }
-    } else {
-      if (s.timing.effects.length >= 500) fail('VALIDATION', 'At most 500 timed conditions per encounter');
-      const timer = { ...input, ...timing, id: ctx.newId() };
-      s.timing.effects.push(timer);
-      condition.effectId = timer.id;
-    }
-  };
-  const endConcentration = (id: string) => {
-    const c = concentration(id);
-    const effectIds = new Set(c.linkedEffects.map((e) => e.id));
-    affected.push(c.combatantId, ...s.conditions.filter((k) => k.effectId !== null && effectIds.has(k.effectId)).map((k) => k.targetCombatantId));
-    s.conditions = s.conditions.filter((k) => k.effectId === null || !effectIds.has(k.effectId));
-    s.concentrations = s.concentrations.filter((k) => k.id !== id);
-    for (const effect of [...s.timing.effects]) if (effect.duration.kind === 'concentration' && effect.duration.concentrationId === id) endEffect(s, effect.id, affected);
   };
   const checkpoint: Checkpoint = { round: s.round, activeId: s.activeId, schedule: structuredClone(s.schedule) };
   s.checkpoint = null; // every mutation clears it; only NEXT_TURN sets it again
@@ -265,7 +208,7 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
       const c = live(cmd.combatantId);
       const conc = s.concentrations.find((k) => k.combatantId === c.id);
       if (conc && !cmd.concentrationPolicy) fail('VALIDATION', 'Choose whether to keep or end concentration when removing its caster');
-      if (conc && cmd.concentrationPolicy === 'end') endConcentration(conc.id);
+      if (conc && cmd.concentrationPolicy === 'end') endConcentration(s, affected, conc.id);
       c.removedAt = ctx.now;
       s.schedule.pendingIds = s.schedule.pendingIds.filter((id) => id !== c.id);
       if (s.activeId === c.id) {
@@ -368,7 +311,7 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
         sourceCombatantId: effect ? effect.sourceCombatantId : owner?.combatantId ?? cmd.sourceCombatantId ?? null, sourceLabel: cmd.sourceLabel, notes: cmd.notes, effectId: cmd.effectId ?? null,
       };
       s.conditions.push(condition);
-      if (cmd.duration) setConditionDuration(condition, cmd.duration);
+      if (cmd.duration) setConditionDuration(s, affected, ctx.newId, condition, cmd.duration);
       affected.push(cmd.combatantId);
       break;
     }
@@ -377,7 +320,7 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
       get(condition.targetCombatantId);
       if (cmd.sourceCombatantId) get(cmd.sourceCombatantId);
       Object.assign(condition, { sourceCombatantId: cmd.sourceCombatantId, sourceLabel: cmd.sourceLabel, notes: cmd.notes });
-      setConditionDuration(condition, cmd.duration);
+      setConditionDuration(s, affected, ctx.newId, condition, cmd.duration);
       affected.push(condition.targetCombatantId);
       break;
     }
@@ -387,7 +330,7 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
       const old = s.concentrations.find((k) => k.combatantId === c.id);
       if (old && !cmd.replace) fail('INVALID_STATE', `Confirm replacement of ${old.name} and its linked effects`);
       if (!old && s.concentrations.length >= MAX_COMBATANTS) fail('INVALID_STATE', `An encounter can have at most ${MAX_COMBATANTS} active concentrations, including removed casters`);
-      if (old) endConcentration(old.id);
+      if (old) endConcentration(s, affected, old.id);
       s.concentrations.push({
         id: ctx.newId(), combatantId: c.id, name: cmd.name, startedAt: ctx.now,
         startBoundary: { version: s.version + 1, round: s.round, activeCombatantId: s.activeId },
@@ -397,17 +340,17 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
       break;
     }
     case 'END_CONCENTRATION':
-      endConcentration(cmd.concentrationId); // manual end and confirmed death have the same bookkeeping
+      endConcentration(s, affected, cmd.concentrationId); // manual end and confirmed death have the same bookkeeping
       break;
     case 'CREATE_EFFECT':
-      validateEffect(cmd.effect);
+      validateEffect(s, cmd.effect);
       if (s.timing.effects.length >= 500) fail('VALIDATION', 'At most 500 active effects per encounter');
       s.timing.effects.push({ ...cmd.effect, id: ctx.newId(), createdVersion: s.version + 1, createdBoundaryId: s.timing.boundaryId, armedBoundaryId: null, expiresRound: expiryRound(s, cmd.effect.duration) });
       affected.push(...cmd.effect.targetCombatantIds);
       break;
     case 'UPDATE_EFFECT': {
       const effect = s.timing.effects.find((e) => e.id === cmd.effectId) ?? fail('NOT_FOUND', 'Effect not found');
-      validateEffect(cmd.effect, effect.targetCombatantIds);
+      validateEffect(s, cmd.effect, effect.targetCombatantIds);
       s.conditions = s.conditions.filter((c) => c.effectId !== effect.id || cmd.effect.targetCombatantIds.includes(c.targetCombatantId));
       for (const c of s.conditions) if (c.effectId === effect.id) c.sourceCombatantId = cmd.effect.sourceCombatantId;
       affected.push(...effect.targetCombatantIds, ...cmd.effect.targetCombatantIds);
@@ -452,30 +395,30 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
       break;
     }
     case 'ADD_CONCENTRATION_EFFECT': {
-      const conc = concentration(cmd.concentrationId);
+      const conc = getConcentration(s, cmd.concentrationId);
       if (conc.linkedEffects.length >= 200) fail('VALIDATION', 'A concentration can have at most 200 linked effects');
       conc.linkedEffects.push({ id: ctx.newId(), name: cmd.name });
       affected.push(conc.combatantId);
       break;
     }
     case 'RESOLVE_CONCENTRATION_CHECK': {
-      const conc = concentration(cmd.concentrationId);
+      const conc = getConcentration(s, cmd.concentrationId);
       if (!conc.checks.some((c) => c.id === cmd.checkId)) fail('NOT_FOUND', 'Concentration check not found');
-      if (cmd.outcome === 'failure') endConcentration(conc.id);
+      if (cmd.outcome === 'failure') endConcentration(s, affected, conc.id);
       else conc.checks = conc.checks.filter((c) => c.id !== cmd.checkId);
       affected.push(conc.combatantId);
       break;
     }
     case 'REMOVE_CONDITION': {
       const cond = s.conditions.find((c) => c.id === cmd.applicationId) ?? fail('NOT_FOUND', 'Condition application not found');
-      releaseConditionTimer(cond);
+      releaseConditionTimer(s, affected, cond);
       s.conditions = s.conditions.filter((c) => c !== cond);
       affected.push(cond.targetCombatantId);
       break;
     }
     case 'REMOVE_ALL_CONDITION_SOURCES':
       get(cmd.combatantId);
-      for (const c of s.conditions.filter((c) => c.targetCombatantId === cmd.combatantId && c.conditionKey === cmd.conditionKey)) releaseConditionTimer(c);
+      for (const c of s.conditions.filter((c) => c.targetCombatantId === cmd.combatantId && c.conditionKey === cmd.conditionKey)) releaseConditionTimer(s, affected, c);
       s.conditions = s.conditions.filter((c) => !(c.targetCombatantId === cmd.combatantId && c.conditionKey === cmd.conditionKey));
       affected.push(cmd.combatantId);
       break;
@@ -548,7 +491,7 @@ export function applyCommand(prev: EncounterState, cmd: EncounterCommand, ctx: C
 
   // Evaluate all sources before cleanup so simultaneous incapacitation is not order-dependent.
   const incapacitated = s.concentrations.filter((c) => isIncapacitated(s.conditions, c.combatantId)).map((c) => c.id);
-  for (const id of incapacitated) endConcentration(id);
+  for (const id of incapacitated) endConcentration(s, affected, id);
   if (cmd.type === 'NEXT_TURN' && (prev.timing.effects.some((e) => !s.timing.effects.some((f) => f.id === e.id)) || prev.timing.occurrences.length !== s.timing.occurrences.length)) s.checkpoint = null;
   s.version += 1;
   s.updatedAt = ctx.now;
