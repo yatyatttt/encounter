@@ -6,6 +6,14 @@ Local-first D&D 2024 combat manager for a single DM on one machine. Prepare reus
 
 ## Install and run
 
+### Portable Windows download
+
+When `Encounter-Windows-x64.zip` is available in [GitHub Releases](https://github.com/yatyatttt/encounter/releases), download it and choose **Extract All**. Open the extracted folder and double-click **Start Encounter**. The app opens in your default browser. Keep the launcher window open while playing and press `Ctrl+C` to stop it.
+
+The ZIP includes Node.js. Your encounters and backups live in `%APPDATA%\Encounter`, so you can extract a newer version to a new folder and open it with the same saved data.
+
+### Run from source
+
 Requires **Node.js 20 or newer** and npm. Run these commands from the repository directory:
 
 ```sh

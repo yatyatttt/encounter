@@ -1,0 +1,71 @@
+name: Build portable Windows ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          architecture: x64
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+
+      - name: Package Encounter
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bundle/runtime | Out-Null
+          $node = (Get-Command node.exe).Source
+          Copy-Item $node bundle/runtime/node.exe
+          Copy-Item (Join-Path (Split-Path $node) 'LICENSE') bundle/runtime/Node-LICENSE.txt
+          # tsx is a dev dependency used by the bundled server at runtime.
+          Copy-Item -Recurse -Path src,dist,drizzle,node_modules,package.json,'Start Encounter.cmd' -Destination bundle
+          tar.exe -a -cf Encounter-Windows-x64.zip -C bundle .
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the Windows ZIP.' }
+
+      - name: Smoke test the extracted ZIP
+        shell: pwsh
+        run: |
+          $folder = Join-Path $env:RUNNER_TEMP 'Encounter smoke test'
+          Expand-Archive Encounter-Windows-x64.zip -DestinationPath $folder
+          $env:ENCOUNTER_DATA_DIR = Join-Path $env:RUNNER_TEMP 'Encounter smoke data'
+          $env:PORT = '18787'
+          $url = "http://127.0.0.1:$env:PORT"
+          $server = Start-Process -FilePath (Join-Path $folder 'runtime/node.exe') `
+            -ArgumentList '--import', 'tsx', 'src/server/index.ts' `
+            -WorkingDirectory $folder -NoNewWindow -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              if ($server.HasExited) { throw "Encounter exited with code $($server.ExitCode)." }
+              try {
+                $health = Invoke-RestMethod "$url/api/v1/health" -TimeoutSec 2
+                if ($health.status -eq 'ok') { $ready = $true; break }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if (-not $ready) { throw 'The bundled server did not become ready.' }
+            $page = Invoke-WebRequest $url -TimeoutSec 5
+            if ($page.Content -notmatch '<title>Encounter</title>') { throw 'The frontend did not load.' }
+          } finally {
+            if (-not $server.HasExited) { Stop-Process -InputObject $server }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: Encounter-Windows-x64.zip
+          archive: false
+          if-no-files-found: error

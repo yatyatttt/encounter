@@ -1,5 +1,6 @@
 // Entry point: opens the database, then serves the API (and the built web app, if present) on 127.0.0.1 only.
 import { serve } from '@hono/node-server';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app';
 import { openDb, resolveDataDir } from './db';
@@ -11,7 +12,13 @@ async function main() {
   const db = await openDb(dataDir);
   const app = createApp(db, { dataDir, port, staticDir: fileURLToPath(new URL('../../dist', import.meta.url)) });
   const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port }, () => {
-    console.log(`Encounter running at http://127.0.0.1:${port} (data: ${dataDir})`);
+    const url = `http://127.0.0.1:${port}`;
+    console.log(`Encounter running at ${url} (data: ${dataDir})`);
+    if (process.platform === 'win32' && process.argv.includes('--open-browser')) {
+      execFile('cmd.exe', ['/d', '/c', 'start', url], { windowsHide: true }, (error) => {
+        if (error) console.error(`Could not open the browser. Open ${url} manually.`);
+      });
+    }
   });
   server.on('error', (e: NodeJS.ErrnoException) => {
     console.error(e.code === 'EADDRINUSE' ? `Port ${port} is already in use. Set PORT to another value or stop the other process.` : `Server error: ${e.message}`);

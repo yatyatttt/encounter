@@ -23,6 +23,7 @@ Use npm and the checked-in `package-lock.json`. `package.json` requires Node >=2
 | Typecheck | `npm run typecheck` (strict TypeScript, no emit) |
 | Build | `npm run build` (Vite builds the web app into `dist/`) |
 | Production app | `npm start` (runs the TypeScript server through `tsx`; serves `dist/` if built) |
+| Portable Windows ZIP | Run **Build portable Windows ZIP** in GitHub Actions (`.github/workflows/windows-zip.yml`). It builds on Windows x64, smoke tests the extracted ZIP with a temporary database, and uploads `Encounter-Windows-x64.zip`. |
 | Development | `npm run dev` (API on 8787, Vite at `http://127.0.0.1:5173`) |
 | Generate migration | `npm run db:generate` |
 
@@ -31,6 +32,7 @@ Run tests, typecheck, and build after code changes and before committing. For gu
 ## Runtime and local data
 
 - The server binds to `127.0.0.1`, default port 8787. API endpoints are under `/api/v1`; the health check is `GET /api/v1/health`.
+- `Start Encounter.cmd` in the Windows ZIP runs the bundled Node executable from the extracted folder. It passes `--open-browser`, which opens the local URL only after the Windows server is listening. Keep `tsx` in the ZIP while the server runs from TypeScript source.
 - `PORT` changes the API port. Vite's `/api/` proxy is hard-coded to 8787 in `vite.config.ts`; setting `PORT` alone does not update the development proxy. Keep the trailing slash so `/api.ts` is served as a frontend module. Keep Vite on 5173, which the server's Host/Origin allowlist includes.
 - `ENCOUNTER_DATA_DIR` selects the directory containing `encounter.sqlite` and `backups/`. Without it, `src/server/db.ts` selects the OS app-data directory.
 - For agent-run smoke tests, use a fresh temporary directory, e.g. `ENCOUNTER_DATA_DIR="$(mktemp -d /tmp/encounter-agent-XXXXXX)" npm run dev`. Do not test mutations or restore against the user's default database.
